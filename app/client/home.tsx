@@ -11,7 +11,7 @@ export default function ClientHome() {
       </Text>
 
       <TouchableOpacity
-        onPress={() => router.push("/client/create")}
+        onPress={() => router.push("/create-service")}
         style={{
           backgroundColor: "#000",
           padding: 16,
