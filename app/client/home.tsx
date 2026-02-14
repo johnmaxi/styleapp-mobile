@@ -1,8 +1,14 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";
 
 export default function ClientHome() {
   const router = useRouter();
+
+  const logout = async () => {
+    await AsyncStorage.clear();
+    router.replace("/login");
+  };
 
   return (
     <View style={{ padding: 30 }}>
@@ -20,6 +26,20 @@ export default function ClientHome() {
       >
         <Text style={{ color: "#fff" }}>
           Solicitar servicio
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={logout}
+        style={{
+          marginTop: 20,
+          backgroundColor: "red",
+          padding: 14,
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ color: "#fff" }}>
+          Cerrar sesión
         </Text>
       </TouchableOpacity>
     </View>

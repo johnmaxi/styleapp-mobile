@@ -1,4 +1,5 @@
 import api from "@/services/api";
+import { setToken as setMemoryToken } from "@/services/tokenManager";
 import * as SecureStore from "expo-secure-store";
 import { createContext, useContext, useEffect, useState } from "react";
 
@@ -23,7 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔄 Cargar sesión al iniciar app
+  // 🔄 LOAD SESSION
   useEffect(() => {
     async function loadSession() {
       try {
@@ -32,6 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (storedToken && storedUser) {
           setToken(storedToken);
+          setMemoryToken(storedToken);
           setUser(JSON.parse(storedUser));
         }
       } catch (err) {
@@ -44,32 +46,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loadSession();
   }, []);
 
- const login = async (email: string, password: string) => {
-  console.log("📨 LOGIN →", email);
+  // 🔐 LOGIN
+  const login = async (email: string, password: string) => {
+    console.log("📨 LOGIN →", email);
+    await SecureStore.deleteItemAsync("token");
+    const res = await api.post("/auth/login", { email, password });
 
-  const res = await api.post("/auth/login", { email, password });
+    console.log("🧪 RESPUESTA LOGIN:", res.data);
 
-  console.log("🧪 RESPUESTA LOGIN:", res.data);
+    const token = String(res.data.token);
+    const user = res.data.user;
 
-  const token = String(res.data.token); // 🔒 FORZAR STRING
-  const user = res.data.user;
+    if (!token || !user) {
+      throw new Error("Respuesta inválida del servidor");
+    }
 
-  if (!token || !user) {
-    throw new Error("Respuesta inválida del servidor");
-  }
+    await SecureStore.setItemAsync("token", token);
+    await SecureStore.setItemAsync("user", JSON.stringify(user));
 
-  await SecureStore.setItemAsync("token", token);
-  await SecureStore.setItemAsync("user", JSON.stringify(user));
+    setToken(token);
+    setMemoryToken(token); // 🔥 CLAVE
+    setUser(user);
+  };
 
-  setToken(token);
-  setUser(user);
-};
-
+  // 🚪 LOGOUT
   const logout = async () => {
     await SecureStore.deleteItemAsync("token");
     await SecureStore.deleteItemAsync("user");
 
     setToken(null);
+    setMemoryToken(null);
     setUser(null);
   };
 
