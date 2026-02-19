@@ -1,6 +1,7 @@
 import { useAuth } from "@/context/AuthContext";
+import { getSession } from "@/store/authStore";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Text,
@@ -8,7 +9,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import api from "../api";
 
 export default function Login() {
   const router = useRouter();
@@ -17,21 +17,20 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // 🔍 TEST BACKEND (solo debug)
-  useEffect(() => {
-    api
-      .get("/")
-      .then((res) => console.log("✅ API OK:", res.data))
-      .catch((err) => console.log("❌ API ERROR:", err.message));
-  }, []);
-
+  
   const handleLogin = async () => {
     try {
       setLoading(true);
       console.log("📨 Enviando login...");
       await login(email, password);
-      router.replace("/");
+      const session = await getSession();
+      if (session?.user.role === "barber") {
+        router.replace("/barber/home");
+      } else if (session?.user.role === "client") {
+        router.replace("/client/home");
+      } else {
+        router.replace("/");
+      }
     } catch (err: any) {
       console.log("❌ ERROR LOGIN:", err?.response?.data || err.message);
       Alert.alert("Error", "Credenciales inválidas");

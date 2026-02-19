@@ -19,6 +19,11 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
+const normalizeToken = (value: unknown) => {
+  if (!value) return "";
+  return String(value).replace(/\s+/g, "").trim();
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -31,9 +36,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const storedToken = await SecureStore.getItemAsync("token");
         const storedUser = await SecureStore.getItemAsync("user");
 
-        if (storedToken && storedUser) {
-          setToken(storedToken);
-          setMemoryToken(storedToken);
+        const cleanToken = normalizeToken(storedToken);
+
+        if (cleanToken && storedUser) {
+          setToken(cleanToken);
+          setMemoryToken(cleanToken);
           setUser(JSON.parse(storedUser));
         }
       } catch (err) {
@@ -49,12 +56,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 🔐 LOGIN
   const login = async (email: string, password: string) => {
     console.log("📨 LOGIN →", email);
-    await SecureStore.deleteItemAsync("token");
     const res = await api.post("/auth/login", { email, password });
 
     console.log("🧪 RESPUESTA LOGIN:", res.data);
 
-    const token = String(res.data.token ?? "").trim();
+    const token = normalizeToken(res.data.token);
     const user = res.data.user;
 
     if (!token || !user) {

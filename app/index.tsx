@@ -1,9 +1,9 @@
-import { getSession } from "@/store/authStore";
-import { useRouter } from "expo-router";
-import { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { Redirect } from "expo-router";
 
-export default function Index() {
+export default function ClientIndex() {
+  return <Redirect href="/client/home" />;
+
+  /*
   const router = useRouter();
 
   useEffect(() => {
@@ -30,5 +30,5 @@ export default function Index() {
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
       <ActivityIndicator size="large" />
     </View>
-  );
+  ); */
 }

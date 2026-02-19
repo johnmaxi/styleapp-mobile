@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";
 
@@ -6,7 +5,6 @@ export default function ClientHome() {
   const router = useRouter();
 
   const logout = async () => {
-    await AsyncStorage.clear();
     router.replace("/login");
   };
 
