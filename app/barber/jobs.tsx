@@ -18,26 +18,6 @@ type RequestItem = {
   status?: string;
 };
 
-async function postFirstAvailable(endpoints: string[]) {
-  let lastError: any;
-
-  for (const endpoint of endpoints) {
-    try {
-      console.log("➡️ PROBANDO ENDPOINT:", endpoint);
-      const res = await api.post(endpoint);
-      return res;
-    } catch (err: any) {
-      lastError = err;
-      const status = err?.response?.status;
-      if (status && status !== 404) {
-        throw err;
-      }
-    }
-  }
-
-  throw lastError || new Error("No se encontró endpoint válido");
-}
-
 export default function Jobs() {
   const router = useRouter();
   const [requests, setRequests] = useState<RequestItem[]>([]);
@@ -47,31 +27,9 @@ export default function Jobs() {
   const loadOpenRequests = useCallback(async () => {
     try {
       setLoading(true);
+      const res = await api.get("/service-request/open");
 
-      let payload: any = [];
-
-      try {
-        const res = await api.get("/service-request/open");
-        payload = res.data;
-      } catch {
-        try {
-          const res = await api.get("/service-requests/open");
-          payload = res.data;
-        } catch {
-          try {
-            const res = await api.get("/service-request", {
-              params: { status: "open" },
-            });
-            payload = res.data;
-          } catch {
-            const fallback = await api.get("/service-requests", {
-              params: { status: "open" },
-            });
-            payload = fallback.data;
-          }
-        }
-      }
-
+      const payload = res.data;
       const list = Array.isArray(payload)
         ? payload
         : Array.isArray(payload?.data)
@@ -83,7 +41,7 @@ export default function Jobs() {
       setRequests(list);
     } catch (err: any) {
       console.log("❌ ERROR CARGANDO OFERTAS:", err?.response?.data || err.message);
-      Alert.alert("Error", "No se pudieron cargar ofertas disponibles");
+      Alert.alert("Error", err?.response?.data?.error || "No se pudieron cargar ofertas disponibles");
     } finally {
       setLoading(false);
     }
@@ -96,15 +54,7 @@ export default function Jobs() {
   const acceptRequest = async (requestId: number) => {
     try {
       setActionLoadingId(requestId);
-
-      await postFirstAvailable([
-        `/service-request/${requestId}/accept`,
-        `/service-requests/${requestId}/accept`,
-        `/service-request/${requestId}/assign`,
-        `/service-requests/${requestId}/assign`,
-        `/service-request/${requestId}/accept-offer`,
-        `/service-requests/${requestId}/accept-offer`,
-      ]);
+      await api.post(`/service-request/${requestId}/accept-offer`);
 
       Alert.alert(
         "Solicitud asignada",
@@ -131,6 +81,7 @@ export default function Jobs() {
   }
 
   return (
+
     <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
       <Text style={{ fontSize: 22, fontWeight: "700" }}>Ofertas disponibles</Text>
 
@@ -186,9 +137,11 @@ export default function Jobs() {
         onPress={() => router.replace("/barber/home")}
         style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
       >
+
         <Text style={{ textAlign: "center" }}>Volver al inicio</Text>
       </TouchableOpacity>
 
     </ScrollView>
   );
+
 }

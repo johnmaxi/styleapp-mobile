@@ -3,33 +3,6 @@ import { useState } from "react";
 import { Alert, Text, TextInput, TouchableOpacity, View } from "react-native";
 import api from "../../api";
 
-async function postCounterOffer(id: string, price: number) {
-  let lastError: any;
-
-  const endpoints = [
-    `/service-request/${id}/counter-offer`,
-    `/service-requests/${id}/counter-offer`,
-    `/service-request/${id}/offer`,
-    `/service-requests/${id}/offer`,
-    `/services/${id}/counter-offer`,
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      console.log("➡️ PROBANDO ENDPOINT:", endpoint);
-      return await api.post(endpoint, { price });
-    } catch (err: any) {
-      lastError = err;
-      const status = err?.response?.status;
-      if (status && status !== 404) {
-        throw err;
-      }
-    }
-  }
-
-  throw lastError || new Error("No se encontró endpoint de contraoferta");
-}
-
 export default function Offer() {
   const router = useRouter();
   const { id, price } = useLocalSearchParams<{ id: string; price?: string }>();
@@ -49,7 +22,9 @@ export default function Offer() {
 
     try {
       setLoading(true);
-      await postCounterOffer(id, Number(counterPrice));
+      await api.post(`/service-request/${id}/counter-offer`, {
+        price: Number(counterPrice),
+      });
 
       Alert.alert(
         "Contraoferta enviada",
@@ -68,6 +43,7 @@ export default function Offer() {
   };
 
   return (
+
     <View style={{ padding: 20, gap: 10 }}>
       <Text style={{ fontSize: 22, fontWeight: "700" }}>Nueva contraoferta</Text>
       <Text>Solicitud: #{id}</Text>
@@ -95,6 +71,7 @@ export default function Offer() {
         onPress={() => router.replace("/barber/jobs")}
         style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
       >
+
         <Text style={{ textAlign: "center" }}>Cancelar y volver</Text>
       </TouchableOpacity>
     </View>
