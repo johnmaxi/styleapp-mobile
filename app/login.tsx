@@ -1,5 +1,4 @@
 import { useAuth } from "@/context/AuthContext";
-import api from "@/services/api";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -9,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import api from "../api";
 
 export default function Login() {
   const router = useRouter();

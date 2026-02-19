@@ -1,7 +1,7 @@
-import api from "@/services/api";
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
+import api from "../../api";
 
 export default function Offer() {
   const { id } = useLocalSearchParams();

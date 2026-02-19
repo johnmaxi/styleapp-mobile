@@ -1,7 +1,7 @@
-import api from "@/services/api";
 import { setToken as setMemoryToken } from "@/services/tokenManager";
 import * as SecureStore from "expo-secure-store";
 import { createContext, useContext, useEffect, useState } from "react";
+import api from "../api";
 
 type User = {
   id: number;
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     console.log("🧪 RESPUESTA LOGIN:", res.data);
 
-    const token = String(res.data.token);
+    const token = String(res.data.token ?? "").trim();
     const user = res.data.user;
 
     if (!token || !user) {

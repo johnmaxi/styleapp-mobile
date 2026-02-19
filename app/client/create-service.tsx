@@ -1,4 +1,3 @@
-import api from "@/services/api";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -9,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import api from "../../api";
 
 export default function CreateService() {
   const router = useRouter();

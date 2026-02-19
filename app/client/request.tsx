@@ -1,5 +1,5 @@
-import api from "@/services/api";
 import { Button, View } from 'react-native';
+import api from "../../api";
 
 export default function Request() {
   const createRequest = async () => {

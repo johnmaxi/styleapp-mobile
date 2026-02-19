@@ -11,14 +11,14 @@ export default function Index() {
     const session = await getSession();
 
     if (!session) {
-      router.replace("/login");
+      router.replace("../login");
       return;
     }
 
     if (session.user.role === "barber") {
       router.replace("/barber/home");
     } else {
-      router.replace("/client/home");
+      router.replace("/client");
     }
   }
 

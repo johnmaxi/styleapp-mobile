@@ -1,16 +1,14 @@
-import { AuthProvider } from "@/context/AuthContext";
 import { Stack } from "expo-router";
-
-export default function RootLayout() {
+export default function BarberLayout() {
   return (
-    <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="barber/home" />
-        <Stack.Screen name="barber/active" />
-        <Stack.Screen name="client/home" />
-      </Stack>
-    </AuthProvider>
+     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="home" />
+      <Stack.Screen name="active" />
+      <Stack.Screen name="bids" />
+      <Stack.Screen name="jobs" />
+      <Stack.Screen name="offer" />
+      <Stack.Screen name="history" />
+    </Stack>
   );
 }
