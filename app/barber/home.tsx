@@ -1,64 +1,41 @@
-import React, { useEffect, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
-import api from "../../api";
+import { clearSession } from "@/store/authStore";
+import { useRouter } from "expo-router";
+import { Text, TouchableOpacity, View } from "react-native";
 
-interface ServiceRequest {
-  id: number;
-  client_id: number;
-  service_type: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-  status: string;
-  requested_at: string;
-  services: string | null;
-  price: string;
-}
+export default function BarberHome() {
+  const router = useRouter();
 
-export default function Home() {
-  const [services, setServices] = useState<ServiceRequest[]>([]);
-
-  const fetchOpenServices = async () => {
-    try {
-      const res = await api.get("/service-requests/open");
-      console.log("RESPUESTA BACKEND:", res.data);
-      setServices(res.data.data);
-    } catch (error: any) {
-      console.log(
-        "ERROR FETCH:",
-        error.response?.data || error.message
-      );
-    }
+  const logout = async () => {
+    await clearSession();
+    router.replace("/login");
   };
 
-  useEffect(() => {
-    fetchOpenServices();
-  }, []);
-
-  console.log("SERVICES:", services);
-
   return (
-    <ScrollView style={{ padding: 20 }}>
-      {services.length === 0 ? (
-        <Text>No hay solicitudes abiertas</Text>
-      ) : (
-        services.map((item) => (
-          <View
-            key={item.id}
-            style={{
-              marginBottom: 15,
-              padding: 15,
-              backgroundColor: "#f2f2f2",
-              borderRadius: 10,
-            }}
-          >
-            <Text>Servicio: {item.service_type}</Text>
-            <Text>Precio: ${item.price}</Text>
-            <Text>Dirección: {item.address}</Text>
-            <Text>Estado: {item.status}</Text>
-          </View>
-        ))
-      )}
-    </ScrollView>
+
+    <View style={{ padding: 30, gap: 12 }}>
+      <Text style={{ fontSize: 24, fontWeight: "700" }}>Inicio Barbero</Text>
+      <Text>Gestiona ofertas, contraofertas y servicios activos.</Text>
+
+      <TouchableOpacity
+        onPress={() => router.push("/barber/jobs")}
+        style={{ backgroundColor: "#111", padding: 14, borderRadius: 8 }}
+      >
+        <Text style={{ color: "#fff", textAlign: "center" }}>Ver ofertas disponibles</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => router.push("/barber/active")}
+        style={{ borderWidth: 1, borderColor: "#999", padding: 14, borderRadius: 8 }}
+      >
+        <Text style={{ textAlign: "center" }}>Ir a servicio activo</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={logout}
+        style={{ borderWidth: 1, borderColor: "#dd0000", padding: 14, borderRadius: 8 }}
+      >
+        <Text style={{ color: "#dd0000", textAlign: "center" }}>Cerrar sesión</Text>
+      </TouchableOpacity>
+    </View>
   );
 }

@@ -1,3 +1,4 @@
+import { clearSession } from "@/store/authStore";
 import { useRouter } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";
 
@@ -5,6 +6,7 @@ export default function ClientHome() {
   const router = useRouter();
 
   const logout = async () => {
+    await clearSession();
     router.replace("/login");
   };
 

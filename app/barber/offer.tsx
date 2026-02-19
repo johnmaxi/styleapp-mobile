@@ -1,28 +1,82 @@
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import api from "../../api";
 
+import { Alert, Text, TextInput, TouchableOpacity, View } from "react-native";
+
 export default function Offer() {
-  const { id } = useLocalSearchParams();
-  const [price, setPrice] = useState("");
+  const router = useRouter();
+  const { id, price } = useLocalSearchParams<{ id: string; price?: string }>();
+  const [counterPrice, setCounterPrice] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const sendCounterOffer = async () => {
+    if (!id) {
+      Alert.alert("Error", "No se encontró la solicitud");
+      return;
+    }
+
+    if (!counterPrice) {
+      Alert.alert("Error", "Ingresa un valor para contraofertar");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      try {
+        await api.post(`/service-requests/${id}/counter-offer`, {
+          price: Number(counterPrice),
+        });
+      } catch {
+        await api.post(`/services/${id}/counter-offer`, {
+          price: Number(counterPrice),
+        });
+      }
+
+      Alert.alert(
+        "Contraoferta enviada",
+        "El cliente recibirá el nuevo valor para aceptar o rechazar."
+      );
+      router.replace("/barber/jobs");
+    } catch (err: any) {
+      console.log("❌ ERROR CONTRAOFERTA:", err?.response?.data || err.message);
+      Alert.alert("Error", "No se pudo enviar la contraoferta");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <View style={{ padding: 20 }}>
-      <Text>Contraoferta</Text>
+    <View style={{ padding: 20, gap: 10 }}>
+      <Text style={{ fontSize: 22, fontWeight: "700" }}>Nueva contraoferta</Text>
+      <Text>Solicitud: #{id}</Text>
+      <Text>Precio del cliente: ${price || "No definido"}</Text>
 
       <TextInput
         keyboardType="numeric"
-        value={price}
-        onChangeText={setPrice}
-        style={{ borderWidth: 1, padding: 10 }}
+        placeholder="Tu nuevo precio"
+        value={counterPrice}
+        onChangeText={setCounterPrice}
+        style={{ borderWidth: 1, borderColor: "#ccc", padding: 10, borderRadius: 8 }}
       />
 
       <TouchableOpacity
-        onPress={() => api.post(`/services/${id}/counter-offer`, { price })}
-        style={{ backgroundColor: "black", padding: 15 }}
+        onPress={sendCounterOffer}
+        disabled={loading}
+        style={{ backgroundColor: "#111", padding: 14, borderRadius: 8 }}
       >
-        <Text style={{ color: "white" }}>Enviar oferta</Text>
+        <Text style={{ color: "white", textAlign: "center" }}>
+          {loading ? "Enviando..." : "Enviar contraoferta"}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => router.replace("/barber/jobs")}
+        style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
+      >
+
+        <Text style={{ textAlign: "center" }}>Cancelar y volver</Text>
       </TouchableOpacity>
     </View>
   );
