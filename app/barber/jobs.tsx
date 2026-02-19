@@ -18,6 +18,26 @@ type RequestItem = {
   status?: string;
 };
 
+async function postFirstAvailable(endpoints: string[]) {
+  let lastError: any;
+
+  for (const endpoint of endpoints) {
+    try {
+      console.log("➡️ PROBANDO ENDPOINT:", endpoint);
+      const res = await api.post(endpoint);
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.response?.status;
+      if (status && status !== 404) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error("No se encontró endpoint válido");
+}
+
 export default function Jobs() {
   const router = useRouter();
   const [requests, setRequests] = useState<RequestItem[]>([]);
@@ -77,11 +97,14 @@ export default function Jobs() {
     try {
       setActionLoadingId(requestId);
 
-      try {
-        await api.post(`/service-request/${requestId}/accept`);
-      } catch {
-        await api.post(`/service-request/${requestId}/assign`);
-      }
+      await postFirstAvailable([
+        `/service-request/${requestId}/accept`,
+        `/service-requests/${requestId}/accept`,
+        `/service-request/${requestId}/assign`,
+        `/service-requests/${requestId}/assign`,
+        `/service-request/${requestId}/accept-offer`,
+        `/service-requests/${requestId}/accept-offer`,
+      ]);
 
       Alert.alert(
         "Solicitud asignada",
@@ -90,7 +113,10 @@ export default function Jobs() {
       router.push({ pathname: "/barber/active", params: { id: String(requestId) } });
     } catch (err: any) {
       console.log("❌ ERROR ACEPTANDO SOLICITUD:", err?.response?.data || err.message);
-      Alert.alert("Error", "No fue posible aceptar la solicitud");
+      Alert.alert(
+        "Error",
+        err?.response?.data?.error || "No fue posible aceptar la solicitud"
+      );
     } finally {
       setActionLoadingId(null);
     }
@@ -162,6 +188,7 @@ export default function Jobs() {
       >
         <Text style={{ textAlign: "center" }}>Volver al inicio</Text>
       </TouchableOpacity>
+
     </ScrollView>
   );
 }
