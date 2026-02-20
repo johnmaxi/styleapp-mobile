@@ -1,93 +1,52 @@
 import { clearSession } from "@/store/authStore";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Alert, Linking, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import api from "../../api";
-
-type ActiveRequest = {
-  id: number;
-  service_type?: string;
-  address?: string;
-  latitude?: number;
-  longitude?: number;
-  price?: number;
-  status?: string;
-};
 
 export default function ActiveJob() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
-  const [service, setService] = useState<ActiveRequest | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
+  const params = useLocalSearchParams<{
+    id?: string;
+    service_type?: string;
+    address?: string;
+    latitude?: string;
+    longitude?: string;
+    price?: string;
+    status?: string;
+  }>();
 
-  const loadActiveService = useCallback(async () => {
-    try {
-      if (id) {
-        const detail = await api.get(`/service-request/${id}`);
-        setService(detail.data);
-        return;
-      }
-
-      const res = await api.get("/service-request/assigned/me");
-      if (Array.isArray(res.data)) {
-        setService(res.data[0] || null);
-      } else {
-        setService(res.data || null);
-      }
-    } catch (err: any) {
-      console.log("❌ ERROR SERVICIO ACTIVO:", err?.response?.data || err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    loadActiveService();
-    const timer = setInterval(loadActiveService, 8000);
-    return () => clearInterval(timer);
-  }, [loadActiveService]);
+  const serviceId = params.id ? Number(params.id) : null;
+  const latitude = Number(params.latitude || 0);
+  const longitude = Number(params.longitude || 0);
 
   const openMaps = async () => {
-    if (!service?.latitude || !service?.longitude) {
-      Alert.alert("Ubicación no disponible", "La solicitud no tiene coordenadas.");
+    if (!latitude || !longitude) {
+      Alert.alert("Ubicación no disponible", "La solicitud no tiene coordenadas válidas.");
       return;
     }
 
-    const url = `https://www.google.com/maps/search/?api=1&query=${service.latitude},${service.longitude}`;
+    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
     await Linking.openURL(url);
   };
 
-  const updateStatus = async (nextStatus: "start" | "complete") => {
-    if (!service?.id) return;
+  const updateStatus = async (status: "on_route" | "completed") => {
+    if (!serviceId) {
+      Alert.alert("Error", "No se encontró la solicitud activa");
+      return;
+    }
 
     try {
-      setProcessing(true);
-      await api.post(`/service-request/${service.id}/${nextStatus}`);
-      await loadActiveService();
+      await api.patch(`/service-requests/${serviceId}/status`, { status });
 
-      if (nextStatus === "start") {
-        Alert.alert("Servicio iniciado", "Se notificó al cliente que ya comenzaste.");
+      if (status === "on_route") {
+        Alert.alert("Servicio iniciado", "Estado actualizado a on_route.");
       } else {
-        Alert.alert(
-          "Servicio finalizado",
-          "Se cerró la solicitud y se registró el pago para el barbero."
-        );
+        Alert.alert("Servicio finalizado", "Estado actualizado a completed.");
         router.replace("/barber/home");
       }
     } catch (err: any) {
       console.log("❌ ERROR ACTUALIZANDO ESTADO:", err?.response?.data || err.message);
-      Alert.alert("Error", "No se pudo actualizar el estado del servicio");
-    } finally {
-      setProcessing(false);
+      Alert.alert("Error", err?.response?.data?.error || "No se pudo actualizar el estado");
     }
   };
 
@@ -96,23 +55,15 @@ export default function ActiveJob() {
     router.replace("/login");
   };
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
-
-  if (!service) {
+  if (!serviceId) {
     return (
       <View style={{ padding: 20, gap: 10 }}>
-        <Text>No tienes solicitudes activas.</Text>
+        <Text>No hay solicitud activa seleccionada.</Text>
         <TouchableOpacity
           onPress={() => router.replace("/barber/jobs")}
           style={{ backgroundColor: "#111", padding: 12, borderRadius: 8 }}
         >
-          <Text style={{ color: "#fff", textAlign: "center" }}>Buscar ofertas</Text>
+          <Text style={{ color: "#fff", textAlign: "center" }}>Volver a ofertas</Text>
         </TouchableOpacity>
       </View>
     );
@@ -121,11 +72,11 @@ export default function ActiveJob() {
   return (
     <ScrollView contentContainerStyle={{ padding: 20, gap: 10 }}>
       <Text style={{ fontSize: 22, fontWeight: "700" }}>Servicio activo</Text>
-      <Text>Solicitud #{service.id}</Text>
-      <Text>Estado: {service.status || "asignado"}</Text>
-      <Text>Servicio: {service.service_type || "No definido"}</Text>
-      <Text>Dirección: {service.address || "No definida"}</Text>
-      <Text>Valor: ${service.price ?? 0}</Text>
+      <Text>Solicitud #{serviceId}</Text>
+      <Text>Estado: {params.status || "accepted"}</Text>
+      <Text>Servicio: {params.service_type || "No definido"}</Text>
+      <Text>Dirección: {params.address || "No definida"}</Text>
+      <Text>Valor: ${params.price || 0}</Text>
 
       <TouchableOpacity
         onPress={openMaps}
@@ -135,18 +86,16 @@ export default function ActiveJob() {
       </TouchableOpacity>
 
       <TouchableOpacity
-        onPress={() => updateStatus("start")}
-        disabled={processing}
+        onPress={() => updateStatus("on_route")}
         style={{ backgroundColor: "#0A7E07", padding: 12, borderRadius: 8 }}
       >
         <Text style={{ color: "#fff", textAlign: "center" }}>
-          {processing ? "Procesando..." : "Llegué al cliente / Iniciar servicio"}
+          Llegué al cliente / Iniciar servicio
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        onPress={() => updateStatus("complete")}
-        disabled={processing}
+        onPress={() => updateStatus("completed")}
         style={{ backgroundColor: "#111", padding: 12, borderRadius: 8 }}
       >
         <Text style={{ color: "#fff", textAlign: "center" }}>

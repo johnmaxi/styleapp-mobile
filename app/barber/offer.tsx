@@ -22,13 +22,14 @@ export default function Offer() {
 
     try {
       setLoading(true);
-      await api.post(`/service-request/${id}/counter-offer`, {
-        price: Number(counterPrice),
+      await api.post("/bids", {
+        service_request_id: Number(id),
+        amount: Number(counterPrice),
       });
 
       Alert.alert(
         "Contraoferta enviada",
-        "El cliente recibirá el nuevo valor para aceptar o rechazar."
+        "El cliente podrá revisarla en sus ofertas."
       );
       router.replace("/barber/jobs");
     } catch (err: any) {
@@ -43,7 +44,6 @@ export default function Offer() {
   };
 
   return (
-
     <View style={{ padding: 20, gap: 10 }}>
       <Text style={{ fontSize: 22, fontWeight: "700" }}>Nueva contraoferta</Text>
       <Text>Solicitud: #{id}</Text>
@@ -71,7 +71,6 @@ export default function Offer() {
         onPress={() => router.replace("/barber/jobs")}
         style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
       >
-
         <Text style={{ textAlign: "center" }}>Cancelar y volver</Text>
       </TouchableOpacity>
     </View>

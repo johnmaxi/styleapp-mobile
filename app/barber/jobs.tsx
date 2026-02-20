@@ -1,4 +1,6 @@
 import { useRouter } from "expo-router";
+import api from "../../api";
+
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -8,7 +10,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import api from "../../api";
 
 type RequestItem = {
   id: number;
@@ -16,6 +17,8 @@ type RequestItem = {
   price?: number;
   address?: string;
   status?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 export default function Jobs() {
@@ -27,16 +30,14 @@ export default function Jobs() {
   const loadOpenRequests = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await api.get("/service-request/open");
+      const res = await api.get("/service-requests/open");
 
       const payload = res.data;
       const list = Array.isArray(payload)
         ? payload
         : Array.isArray(payload?.data)
           ? payload.data
-          : Array.isArray(payload?.requests)
-            ? payload.requests
-            : [];
+          : [];
 
       setRequests(list);
     } catch (err: any) {
@@ -51,16 +52,31 @@ export default function Jobs() {
     loadOpenRequests();
   }, [loadOpenRequests]);
 
-  const acceptRequest = async (requestId: number) => {
+  const acceptRequest = async (item: RequestItem) => {
     try {
-      setActionLoadingId(requestId);
-      await api.post(`/service-request/${requestId}/accept-offer`);
+      setActionLoadingId(item.id);
+
+      await api.patch(`/service-requests/${item.id}/status`, {
+        status: "accepted",
+      });
 
       Alert.alert(
-        "Solicitud asignada",
-        "Se notificó al cliente y puedes iniciar seguimiento en el servicio activo."
+        "Solicitud aceptada",
+        "La solicitud cambió a estado accepted."
       );
-      router.push({ pathname: "/barber/active", params: { id: String(requestId) } });
+
+      router.push({
+        pathname: "/barber/active",
+        params: {
+          id: String(item.id),
+          service_type: item.service_type || "",
+          address: item.address || "",
+          price: String(item.price ?? 0),
+          latitude: String(item.latitude ?? 0),
+          longitude: String(item.longitude ?? 0),
+          status: "accepted",
+        },
+      });
     } catch (err: any) {
       console.log("❌ ERROR ACEPTANDO SOLICITUD:", err?.response?.data || err.message);
       Alert.alert(
@@ -81,7 +97,6 @@ export default function Jobs() {
   }
 
   return (
-
     <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
       <Text style={{ fontSize: 22, fontWeight: "700" }}>Ofertas disponibles</Text>
 
@@ -100,7 +115,7 @@ export default function Jobs() {
           <Text>Precio ofertado: ${item.price ?? 0}</Text>
 
           <TouchableOpacity
-            onPress={() => acceptRequest(item.id)}
+            onPress={() => acceptRequest(item)}
             disabled={actionLoadingId === item.id}
             style={{ backgroundColor: "#0A7E07", padding: 12, marginTop: 10, borderRadius: 8 }}
           >
@@ -137,11 +152,8 @@ export default function Jobs() {
         onPress={() => router.replace("/barber/home")}
         style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
       >
-
         <Text style={{ textAlign: "center" }}>Volver al inicio</Text>
       </TouchableOpacity>
-
     </ScrollView>
   );
-
 }
