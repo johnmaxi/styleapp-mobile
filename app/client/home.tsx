@@ -1,32 +1,41 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useAuth } from "../../context/AuthContext";
+import { clearSession } from "../../store/authStore";
+import { getPalette } from "../../utils/palette";
 import { useRouter } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";
 
 export default function ClientHome() {
   const router = useRouter();
+  const { user } = useAuth();
+  const palette = getPalette(user?.gender);
 
   const logout = async () => {
-    await AsyncStorage.clear();
+    await clearSession();
     router.replace("/login");
   };
 
   return (
-    <View style={{ padding: 30 }}>
-      <Text style={{ fontSize: 22, marginBottom: 20 }}>
-        👋 Bienvenido cliente
-      </Text>
+    <View style={{ padding: 30, backgroundColor: palette.background, flex: 1 }}>
+      <Text style={{ fontSize: 22, marginBottom: 20, color: palette.text }}>👋 Bienvenido cliente</Text>
 
       <TouchableOpacity
         onPress={() => router.push("/client/create-service")}
         style={{
-          backgroundColor: "#000",
+          backgroundColor: palette.card,
           padding: 16,
           alignItems: "center",
+          borderWidth: 1,
+          borderColor: palette.primary,
         }}
       >
-        <Text style={{ color: "#fff" }}>
-          Solicitar servicio
-        </Text>
+        <Text style={{ color: palette.text }}>Solicitar servicio</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => router.push("/profile")}
+        style={{ marginTop: 12, borderWidth: 1, borderColor: palette.primary, padding: 14, alignItems: "center" }}
+      >
+        <Text style={{ color: palette.text }}>Mi perfil (saldo y resumen)</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -38,9 +47,7 @@ export default function ClientHome() {
           alignItems: "center",
         }}
       >
-        <Text style={{ color: "#fff" }}>
-          Cerrar sesión
-        </Text>
+        <Text style={{ color: "#fff" }}>Cerrar sesión</Text>
       </TouchableOpacity>
     </View>
   );

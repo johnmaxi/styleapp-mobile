@@ -7,12 +7,25 @@ const api = axios.create({
   baseURL: "http://192.168.1.7:3000/api"
 });
 
-api.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync("token");
+const normalizeToken = (value: string | null) => {
+  if (!value) return "";
+  return value.replace(/\s+/g, "").trim();
+};
 
-  console.log("🪪 TOKEN ENVIADO:", token);
+api.interceptors.request.use(async (config) => {
+  const requestUrl = String(config.url ?? "");
+  const isAuthRequest =
+    requestUrl.includes("/auth/login") || requestUrl.includes("/auth/register");
+
+  if (isAuthRequest) {
+    return config;
+  }
+
+  const storedToken = await SecureStore.getItemAsync("token");
+  const token = normalizeToken(storedToken);
 
   if (token) {
+    console.log("🪪 TOKEN ENVIADO:", token);
     config.headers.Authorization = `Bearer ${token}`;
   }
 

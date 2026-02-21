@@ -6,7 +6,8 @@ import { createContext, useContext, useEffect, useState } from "react";
 type User = {
   id: number;
   email: string;
-  role: "client" | "barber";
+  role: "client" | "barber" | "admin";
+  gender?: "male" | "female";
 };
 
 type AuthContextType = {
@@ -18,6 +19,28 @@ type AuthContextType = {
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
+
+const normalizeToken = (value: unknown) => {
+  if (!value) return "";
+  return String(value).replace(/\s+/g, "").trim();
+};
+
+const enrichUser = async (baseUser: User, token?: string | null): Promise<User> => {
+  try {
+    const res = await api.get(`/usuarios/me/${baseUser.id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    const profile = res?.data?.user ?? res?.data;
+
+    return {
+      ...baseUser,
+      gender: profile?.gender || baseUser.gender,
+    };
+  } catch {
+    return baseUser;
+  }
+};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -31,10 +54,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const storedToken = await SecureStore.getItemAsync("token");
         const storedUser = await SecureStore.getItemAsync("user");
 
-        if (storedToken && storedUser) {
-          setToken(storedToken);
-          setMemoryToken(storedToken);
-          setUser(JSON.parse(storedUser));
+        const cleanToken = normalizeToken(storedToken);
+
+        if (cleanToken && storedUser) {
+          setToken(cleanToken);
+          setMemoryToken(cleanToken);
+          const parsed = JSON.parse(storedUser);
+          const enriched = await enrichUser(parsed, cleanToken);
+          setUser(enriched);
+          await SecureStore.setItemAsync("user", JSON.stringify(enriched));
         }
       } catch (err) {
         console.log("❌ Error cargando sesión", err);
@@ -49,13 +77,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 🔐 LOGIN
   const login = async (email: string, password: string) => {
     console.log("📨 LOGIN →", email);
-    await SecureStore.deleteItemAsync("token");
     const res = await api.post("/auth/login", { email, password });
 
     console.log("🧪 RESPUESTA LOGIN:", res.data);
 
-    const token = String(res.data.token);
-    const user = res.data.user;
+    const token = normalizeToken(res.data.token);
+    const user = await enrichUser(res.data.user, token);
 
     if (!token || !user) {
       throw new Error("Respuesta inválida del servidor");

@@ -1,5 +1,5 @@
 import { Redirect } from "expo-router";
 
-export default function BarberIndex() {
-  return <Redirect href="/barber/home" />;
+export default function ClientIndex() {
+  return <Redirect href="/client/home" />;
 }

@@ -20,9 +20,9 @@ export default function CreateService() {
   const options = ["corte", "barba", "cejas", "manicure"];
 
   const toggleService = (service: string) => {
-    setServices(prev =>
+    setServices((prev) =>
       prev.includes(service)
-        ? prev.filter(s => s !== service)
+        ? prev.filter((s) => s !== service)
         : [...prev, service]
     );
   };
@@ -41,47 +41,38 @@ export default function CreateService() {
 
       setLoading(true);
 
-      // 🔥 PEDIR PERMISOS
-      const { status } =
-        await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
         Alert.alert("Permiso requerido", "Activa ubicación");
         return;
       }
 
-      // 🔥 OBTENER UBICACIÓN
-      const location =
-        await Location.getCurrentPositionAsync({});
-
+      const location = await Location.getCurrentPositionAsync({});
       const { latitude, longitude } = location.coords;
 
-      // 🔥 OBTENER DIRECCIÓN
-      const addressData =
-        await Location.reverseGeocodeAsync({
-          latitude,
-          longitude,
-        });
-
-      const address =
-        addressData[0]?.street +
-        " " +
-        addressData[0]?.city;
-
-      await api.post("/service-requests", {
-        service_type: services.join(","),
-        price: Number(price),
-        address: "Direccion MVP",
-        latitude: 0,
-        longitude: 0,
+      const addressData = await Location.reverseGeocodeAsync({
+        latitude,
+        longitude,
       });
 
-      router.replace("/client/status");
+      const address = `${addressData[0]?.street || ""} ${addressData[0]?.city || ""}`.trim();
+
+      const res = await api.post("/service-requests", {
+        service_type: services.join(","),
+        price: Number(price),
+        address: address || "Direccion MVP",
+        latitude,
+        longitude,
+      });
+
+      const createdId = res?.data?.data?.id;
+      router.replace({
+        pathname: "/client/status",
+        params: createdId ? { id: String(createdId) } : undefined,
+      });
     } catch (err: any) {
-      console.log(
-        "🔥 ERROR CREAR SERVICIO:",
-        err?.response?.data || err.message
-      );
+      console.log("🔥 ERROR CREAR SERVICIO:", err?.response?.data || err.message);
       Alert.alert("Error", "No se pudo crear el servicio");
     } finally {
       setLoading(false);
@@ -90,15 +81,11 @@ export default function CreateService() {
 
   return (
     <View style={{ padding: 30 }}>
-      <Text style={{ fontSize: 22, marginBottom: 20 }}>
-        Crear servicio
-      </Text>
+      <Text style={{ fontSize: 22, marginBottom: 20 }}>Crear servicio</Text>
 
-      <Text style={{ marginBottom: 10 }}>
-        ¿Qué servicio necesitas?
-      </Text>
+      <Text style={{ marginBottom: 10 }}>¿Qué servicio necesitas?</Text>
 
-      {options.map(item => (
+      {options.map((item) => (
         <TouchableOpacity
           key={item}
           onPress={() => toggleService(item)}
@@ -114,9 +101,7 @@ export default function CreateService() {
               height: 20,
               borderWidth: 1,
               marginRight: 10,
-              backgroundColor: services.includes(item)
-                ? "#000"
-                : "#fff",
+              backgroundColor: services.includes(item) ? "#000" : "#fff",
             }}
           />
           <Text>{item}</Text>
