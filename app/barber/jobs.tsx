@@ -1,6 +1,5 @@
 import { useRouter } from "expo-router";
-import api from "../../api";
-
+import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -10,6 +9,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import api from "../../api";
+import { useAuth } from "../../context/AuthContext";
+import { getBarberStats, markAssigned, setBarberStats } from "../../utils/barberStats";
+import { getPalette } from "../../utils/palette";
 
 type RequestItem = {
   id: number;
@@ -23,13 +26,25 @@ type RequestItem = {
 
 export default function Jobs() {
   const router = useRouter();
+  const { user } = useAuth();
+  const palette = getPalette(user?.gender);
   const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [isActive, setIsActive] = useState(true);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
 
   const loadOpenRequests = useCallback(async () => {
     try {
       setLoading(true);
+
+      const activeFlag = await SecureStore.getItemAsync("barber_is_active");
+      if (activeFlag === "0") {
+        setIsActive(false);
+        setRequests([]);
+        return;
+      }
+
+      setIsActive(true);
       const res = await api.get("/service-requests/open");
 
       const payload = res.data;
@@ -40,6 +55,9 @@ export default function Jobs() {
           : [];
 
       setRequests(list);
+
+      const currentStats = await getBarberStats();
+      await setBarberStats({ ...currentStats, open: list.length });
     } catch (err: any) {
       console.log("❌ ERROR CARGANDO OFERTAS:", err?.response?.data || err.message);
       Alert.alert("Error", err?.response?.data?.error || "No se pudieron cargar ofertas disponibles");
@@ -59,6 +77,7 @@ export default function Jobs() {
       await api.patch(`/service-requests/${item.id}/status`, {
         status: "accepted",
       });
+      await markAssigned();
 
       Alert.alert(
         "Solicitud aceptada",
@@ -97,11 +116,17 @@ export default function Jobs() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Ofertas disponibles</Text>
+    <ScrollView contentContainerStyle={{ padding: 20, gap: 12, backgroundColor: palette.background }}>
+      <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>Ofertas disponibles</Text>
+
+      {!isActive && (
+        <Text style={{ color: "#ffcc66" }}>
+          Estás inactivo. Activa recepción de solicitudes desde inicio barbero.
+        </Text>
+      )}
 
       {requests.length === 0 && (
-        <Text style={{ marginTop: 20 }}>No hay solicitudes abiertas.</Text>
+        <Text style={{ marginTop: 20, color: palette.text }}>No hay solicitudes abiertas.</Text>
       )}
 
       {requests.map((item) => (
@@ -109,10 +134,10 @@ export default function Jobs() {
           key={item.id}
           style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 10, padding: 14 }}
         >
-          <Text style={{ fontWeight: "700" }}>Solicitud #{item.id}</Text>
-          <Text>Servicio: {item.service_type || "No especificado"}</Text>
-          <Text>Dirección: {item.address || "Sin dirección"}</Text>
-          <Text>Precio ofertado: ${item.price ?? 0}</Text>
+          <Text style={{ fontWeight: "700", color: palette.text }}>Solicitud #{item.id}</Text>
+          <Text style={{ color: palette.text }}>Servicio: {item.service_type || "No especificado"}</Text>
+          <Text style={{ color: palette.text }}>Dirección: {item.address || "Sin dirección"}</Text>
+          <Text style={{ color: palette.text }}>Precio ofertado: ${item.price ?? 0}</Text>
 
           <TouchableOpacity
             onPress={() => acceptRequest(item)}
@@ -152,7 +177,7 @@ export default function Jobs() {
         onPress={() => router.replace("/barber/home")}
         style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
       >
-        <Text style={{ textAlign: "center" }}>Volver al inicio</Text>
+        <Text style={{ textAlign: "center", color: palette.text }}>Volver al inicio</Text>
       </TouchableOpacity>
     </ScrollView>
   );

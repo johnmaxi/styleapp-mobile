@@ -1,4 +1,6 @@
-import api from "@//api";
+import api from "@/api";
+import { useAuth } from "@/context/AuthContext";
+import { getPalette } from "@/utils/palette";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -29,11 +31,22 @@ type Bid = {
 export default function ClientStatus() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const { user } = useAuth();
+  const palette = getPalette(user?.gender);
 
   const [loading, setLoading] = useState(true);
   const [request, setRequest] = useState<ServiceRequest | null>(null);
   const [bids, setBids] = useState<Bid[]>([]);
-  const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
+  const [actingBidId, setActingBidId] = useState<number | null>(null);
+
+  const getBidsForRequest = async (requestId: number) => {
+    const bidsRes = await api.get(`/bids/request/${requestId}`);
+    return Array.isArray(bidsRes.data)
+      ? bidsRes.data
+      : Array.isArray(bidsRes.data?.data)
+        ? bidsRes.data.data
+        : [];
+  };
 
   const loadStatus = useCallback(async () => {
     try {
@@ -45,12 +58,33 @@ export default function ClientStatus() {
           : [];
 
       let current: ServiceRequest | undefined;
+      let currentBids: Bid[] = [];
+
       if (id) {
         current = allRequests.find((r) => r.id === Number(id));
+        if (current) currentBids = await getBidsForRequest(current.id);
       }
 
       if (!current) {
-        current = allRequests.find((r) => r.status !== "completed" && r.status !== "cancelled") || allRequests[0];
+        const ordered = [...allRequests].sort((a, b) => b.id - a.id);
+        for (const req of ordered) {
+          if (req.status === "completed" || req.status === "cancelled") continue;
+          const reqBids = await getBidsForRequest(req.id);
+          const hasPendingOrAcceptedBid = reqBids.some(
+            (b: Bid) => b.status === "pending" || b.status === "accepted"
+          );
+
+          if (hasPendingOrAcceptedBid) {
+            current = req;
+            currentBids = reqBids;
+            break;
+          }
+
+          if (!current) {
+            current = req;
+            currentBids = reqBids;
+          }
+        }
       }
 
       if (!current) {
@@ -60,15 +94,7 @@ export default function ClientStatus() {
       }
 
       setRequest(current);
-
-      const bidsRes = await api.get(`/bids/request/${current.id}`);
-      const bidsData: Bid[] = Array.isArray(bidsRes.data)
-        ? bidsRes.data
-        : Array.isArray(bidsRes.data?.data)
-          ? bidsRes.data.data
-          : [];
-
-      setBids(bidsData);
+      setBids(currentBids);
     } catch (err: any) {
       console.log("❌ ERROR STATUS CLIENTE:", err?.response?.data || err.message);
     } finally {
@@ -84,7 +110,7 @@ export default function ClientStatus() {
 
   const acceptBid = async (bidId: number) => {
     try {
-      setAcceptingBidId(bidId);
+      setActingBidId(bidId);
       await api.patch(`/bids/accept/${bidId}`);
       Alert.alert("Oferta aceptada", "Tu servicio fue asignado a un barbero.");
       await loadStatus();
@@ -92,48 +118,68 @@ export default function ClientStatus() {
       console.log("❌ ERROR ACEPTANDO BID:", err?.response?.data || err.message);
       Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar la oferta");
     } finally {
-      setAcceptingBidId(null);
+      setActingBidId(null);
+    }
+  };
+
+  const rejectBid = async (bidId: number) => {
+    try {
+      setActingBidId(bidId);
+      await api.patch(`/bids/reject/${bidId}`);
+      Alert.alert("Oferta rechazada", "Rechazaste la contraoferta del barbero.");
+      await loadStatus();
+    } catch (err: any) {
+      console.log("❌ ERROR RECHAZANDO BID:", err?.response?.data || err.message);
+      Alert.alert(
+        "Pendiente backend",
+        "Tu backend aún no expone PATCH /bids/reject/:bidId. Agrega esa ruta para rechazar contraofertas."
+      );
+    } finally {
+      setActingBidId(null);
     }
   };
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" />
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
+        <ActivityIndicator size="large" color={palette.primary} />
       </View>
     );
   }
 
   if (!request) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
-        <Text>No tienes solicitudes activas.</Text>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: palette.background }}>
+        <Text style={{ color: palette.text }}>No tienes solicitudes activas.</Text>
         <TouchableOpacity
           onPress={() => router.replace("/client/create-service")}
-          style={{ marginTop: 12, backgroundColor: "#111", padding: 12, borderRadius: 8 }}
+          style={{ marginTop: 12, backgroundColor: palette.card, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: palette.primary }}
         >
-          <Text style={{ color: "#fff" }}>Crear solicitud</Text>
+          <Text style={{ color: palette.text }}>Crear solicitud</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   const acceptedBid = bids.find((b) => b.status === "accepted");
+  const pendingBids = bids.filter((b) => b.status === "pending");
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 24, gap: 10 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Estado de tu solicitud</Text>
-      <Text>Solicitud #{request.id}</Text>
-      <Text>Servicio: {request.service_type || "No definido"}</Text>
-      <Text>Dirección: {request.address || "No definida"}</Text>
-      <Text>Precio inicial: ${request.price ?? 0}</Text>
-      <Text>Estado backend: {request.status}</Text>
+    <ScrollView contentContainerStyle={{ padding: 24, gap: 10, backgroundColor: palette.background }}>
+      <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>Estado de tu solicitud</Text>
+      <Text style={{ color: palette.text }}>Solicitud #{request.id}</Text>
+      <Text style={{ color: palette.text }}>Servicio: {request.service_type || "No definido"}</Text>
+      <Text style={{ color: palette.text }}>Dirección: {request.address || "No definida"}</Text>
+      <Text style={{ color: palette.text }}>Precio inicial: ${request.price ?? 0}</Text>
+      <Text style={{ color: palette.text }}>Estado backend: {request.status}</Text>
 
       {request.status === "open" && (
         <View style={{ backgroundColor: "#eef5ff", padding: 12, borderRadius: 8 }}>
           <Text style={{ fontWeight: "700" }}>🔎 Buscando Barberos</Text>
           <Text style={{ marginTop: 6 }}>
-            Esperando aceptación o nuevas contraofertas.
+            {pendingBids.length > 0
+              ? "Tienes contraofertas pendientes. Acepta o rechaza una."
+              : "Esperando contraofertas de barberos."}
           </Text>
         </View>
       )}
@@ -141,54 +187,48 @@ export default function ClientStatus() {
       {request.status === "accepted" && (
         <View style={{ backgroundColor: "#e8fff0", padding: 12, borderRadius: 8 }}>
           <Text style={{ fontWeight: "700" }}>✅ Oferta aceptada</Text>
-          <Text style={{ marginTop: 6 }}>
-            Tu solicitud fue asignada. El barbero iniciará el trayecto pronto.
-          </Text>
+          <Text style={{ marginTop: 6 }}>Tu solicitud fue asignada.</Text>
         </View>
       )}
 
       {request.status === "on_route" && (
         <View style={{ backgroundColor: "#fff6e5", padding: 12, borderRadius: 8 }}>
           <Text style={{ fontWeight: "700" }}>🚗 Barbero en camino</Text>
-          <Text style={{ marginTop: 6 }}>
-            El servicio está en ruta hacia tu dirección.
-          </Text>
         </View>
       )}
 
-      {request.status === "completed" && (
-        <View style={{ backgroundColor: "#f1f1f1", padding: 12, borderRadius: 8 }}>
-          <Text style={{ fontWeight: "700" }}>🏁 Servicio completado</Text>
-        </View>
-      )}
-
-      <Text style={{ fontSize: 18, fontWeight: "700", marginTop: 6 }}>
+      <Text style={{ fontSize: 18, fontWeight: "700", marginTop: 6, color: palette.text }}>
         Contraofertas de barberos
       </Text>
 
-      {bids.length === 0 && (
-        <Text>Aún no hay contraofertas.</Text>
-      )}
+      {bids.length === 0 && <Text style={{ color: palette.text }}>Aún no hay contraofertas.</Text>}
 
       {bids.map((bid) => (
-        <View
-          key={bid.id}
-          style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 12 }}
-        >
-          <Text>Barbero: {bid.name || `#${bid.barber_id ?? "N/A"}`}</Text>
-          <Text>Oferta: ${bid.amount}</Text>
-          <Text>Estado oferta: {bid.status}</Text>
+        <View key={bid.id} style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 12 }}>
+          <Text style={{ color: palette.text }}>Barbero: {bid.name || `#${bid.barber_id ?? "N/A"}`}</Text>
+          <Text style={{ color: palette.text }}>Oferta: ${bid.amount}</Text>
+          <Text style={{ color: palette.text }}>Estado oferta: {bid.status}</Text>
 
           {bid.status === "pending" && request.status === "open" && (
-            <TouchableOpacity
-              onPress={() => acceptBid(bid.id)}
-              disabled={acceptingBidId === bid.id}
-              style={{ backgroundColor: "#0A7E07", padding: 10, borderRadius: 8, marginTop: 8 }}
-            >
-              <Text style={{ color: "#fff", textAlign: "center" }}>
-                {acceptingBidId === bid.id ? "Aceptando..." : "Aceptar contraoferta"}
-              </Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <TouchableOpacity
+                onPress={() => acceptBid(bid.id)}
+                disabled={actingBidId === bid.id}
+                style={{ flex: 1, backgroundColor: "#0A7E07", padding: 10, borderRadius: 8 }}
+              >
+                <Text style={{ color: "#fff", textAlign: "center" }}>
+                  {actingBidId === bid.id ? "Procesando..." : "Aceptar"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => rejectBid(bid.id)}
+                disabled={actingBidId === bid.id}
+                style={{ flex: 1, backgroundColor: "#b30000", padding: 10, borderRadius: 8 }}
+              >
+                <Text style={{ color: "#fff", textAlign: "center" }}>Rechazar</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       ))}
@@ -200,10 +240,7 @@ export default function ClientStatus() {
         </View>
       )}
 
-      <TouchableOpacity
-        onPress={loadStatus}
-        style={{ backgroundColor: "#1f4eb5", padding: 12, borderRadius: 8 }}
-      >
+      <TouchableOpacity onPress={loadStatus} style={{ backgroundColor: "#1f4eb5", padding: 12, borderRadius: 8 }}>
         <Text style={{ color: "#fff", textAlign: "center" }}>Actualizar estado</Text>
       </TouchableOpacity>
     </ScrollView>

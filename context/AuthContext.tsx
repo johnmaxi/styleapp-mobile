@@ -1,12 +1,13 @@
+import api from "@/api";
 import { setToken as setMemoryToken } from "@/services/tokenManager";
 import * as SecureStore from "expo-secure-store";
 import { createContext, useContext, useEffect, useState } from "react";
-import api from "../api";
 
 type User = {
   id: number;
   email: string;
-  role: "client" | "barber";
+  role: "client" | "barber" | "admin";
+  gender?: "male" | "female";
 };
 
 type AuthContextType = {
@@ -22,6 +23,23 @@ const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 const normalizeToken = (value: unknown) => {
   if (!value) return "";
   return String(value).replace(/\s+/g, "").trim();
+};
+
+const enrichUser = async (baseUser: User, token?: string | null): Promise<User> => {
+  try {
+    const res = await api.get(`/usuarios/me/${baseUser.id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    const profile = res?.data?.user ?? res?.data;
+
+    return {
+      ...baseUser,
+      gender: profile?.gender || baseUser.gender,
+    };
+  } catch {
+    return baseUser;
+  }
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -41,7 +59,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cleanToken && storedUser) {
           setToken(cleanToken);
           setMemoryToken(cleanToken);
-          setUser(JSON.parse(storedUser));
+          const parsed = JSON.parse(storedUser);
+          const enriched = await enrichUser(parsed, cleanToken);
+          setUser(enriched);
+          await SecureStore.setItemAsync("user", JSON.stringify(enriched));
         }
       } catch (err) {
         console.log("❌ Error cargando sesión", err);
@@ -61,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log("🧪 RESPUESTA LOGIN:", res.data);
 
     const token = normalizeToken(res.data.token);
-    const user = res.data.user;
+    const user = await enrichUser(res.data.user, token);
 
     if (!token || !user) {
       throw new Error("Respuesta inválida del servidor");
