@@ -1,6 +1,8 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import * as SecureStore from "expo-secure-store";
+import { useMemo, useState } from "react";
 import {
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,114 +13,248 @@ import {
 
 type Role = "client" | "barber";
 type Gender = "male" | "female";
+type PaymentMethod = "tarjeta_credito" | "tarjeta_debito" | "nequi" | "pse" | "efectivo";
+type AccountType = "ahorros" | "corriente";
+
+type RegisterForm = {
+  username: string;
+  password: string;
+  firstName: string;
+  secondName: string;
+  lastName: string;
+  secondLastName: string;
+  documentType: string;
+  documentNumber: string;
+  phone: string;
+  email: string;
+  address: string;
+  paymentMethod: PaymentMethod;
+  accountNumberOrNequi: string;
+  accountType: AccountType;
+  portfolio1: string;
+  portfolio2: string;
+  portfolio3: string;
+  idFront: string;
+  idBack: string;
+};
+
+const initialForm: RegisterForm = {
+  username: "",
+  password: "",
+  firstName: "",
+  secondName: "",
+  lastName: "",
+  secondLastName: "",
+  documentType: "CC",
+  documentNumber: "",
+  phone: "",
+  email: "",
+  address: "",
+  paymentMethod: "nequi",
+  accountNumberOrNequi: "",
+  accountType: "ahorros",
+  portfolio1: "",
+  portfolio2: "",
+  portfolio3: "",
+  idFront: "",
+  idBack: "",
+};
 
 export default function RegisterScreen() {
   const router = useRouter();
-
   const [role, setRole] = useState<Role>("client");
   const [gender, setGender] = useState<Gender>("male");
+  const [form, setForm] = useState<RegisterForm>(initialForm);
 
-  const [form, setForm] = useState({
-    username: "",
-    password: "",
-    firstName: "",
-    secondName: "",
-    lastName: "",
-    secondLastName: "",
-    documentType: "CC",
-    documentNumber: "",
-    phone: "",
-    email: "",
-  });
+  const accent = gender === "male" ? "#D4AF37" : "#B026FF";
 
-  const handleChange = (key: keyof typeof form, value: string) => {
-    setForm({ ...form, [key]: value });
+  const paymentOptions = useMemo(
+    () => [
+      { id: "tarjeta_credito", label: "Tarjeta de crédito" },
+      { id: "tarjeta_debito", label: "Tarjeta débito" },
+      { id: "nequi", label: "Nequi" },
+      { id: "pse", label: "PSE" },
+      { id: "efectivo", label: "Efectivo" },
+    ] satisfies { id: PaymentMethod; label: string }[],
+    []
+  );
+
+  const handleChange = (key: keyof RegisterForm, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-const handleRegister = () => {
-  console.log("REGISTRO:", { role, gender, ...form });
-  router.replace("/login");
-};
+  const validate = () => {
+    if (!form.firstName || !form.lastName || !form.email || !form.password) {
+      return "Completa nombre, apellido, email y contraseña";
+    }
 
+    if (!form.address.trim()) {
+      return "La dirección es obligatoria";
+    }
+
+    if (!["efectivo", "pse", "nequi", "tarjeta_credito", "tarjeta_debito"].includes(form.paymentMethod)) {
+      return "Selecciona un medio de pago válido";
+    }
+
+    if (!form.accountNumberOrNequi.trim()) {
+      return "Debes ingresar número de cuenta o número Nequi";
+    }
+
+    if (role === "barber") {
+      const portfolio = [form.portfolio1, form.portfolio2, form.portfolio3].filter(Boolean);
+      if (portfolio.length < 3) {
+        return "Para barbero debes cargar mínimo 3 fotos del portafolio";
+      }
+
+      if (!form.idFront.trim() || !form.idBack.trim()) {
+        return "Para barbero debes adjuntar cédula por ambos lados";
+      }
+    }
+
+    return null;
+  };
+
+  const handleRegister = async () => {
+    const error = validate();
+    if (error) {
+      Alert.alert("Validación", error);
+      return;
+    }
+
+    const payload = { role, gender, ...form };
+    console.log("REGISTRO:", payload);
+
+    await SecureStore.setItemAsync(
+      "styleapp_profile_defaults",
+      JSON.stringify({
+        address: form.address,
+        paymentMethod: form.paymentMethod,
+        accountNumberOrNequi: form.accountNumberOrNequi,
+        accountType: form.accountType,
+      })
+    );
+
+    Alert.alert(
+      "Registro local guardado",
+      "Los datos extra quedaron listos para autocompletar futuras solicitudes."
+    );
+    router.replace("/login");
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.logo}>✂️💈 StyleApp</Text>
-      <Text style={styles.title}>Registro</Text>
+      <Text style={[styles.logo, { color: accent }]}>✂️ STYLEAPP</Text>
+      <Text style={styles.title}>Registro de usuario</Text>
 
-      <Text style={styles.label}>Tipo de usuario</Text>
+      <SectionLabel text="Tipo de usuario" />
       <View style={styles.row}>
-        <Option text="Cliente" active={role === "client"} onPress={() => setRole("client")} />
-        <Option text="Barbero" active={role === "barber"} onPress={() => setRole("barber")} />
+        <Option text="Cliente" active={role === "client"} accent={accent} onPress={() => setRole("client")} />
+        <Option text="Barbero" active={role === "barber"} accent={accent} onPress={() => setRole("barber")} />
       </View>
 
-      <Text style={styles.label}>Género</Text>
+      <SectionLabel text="Género" />
       <View style={styles.row}>
-        <Option text="Masculino" active={gender === "male"} onPress={() => setGender("male")} />
-        <Option text="Femenino" active={gender === "female"} onPress={() => setGender("female")} />
+        <Option text="Masculino" active={gender === "male"} accent={accent} onPress={() => setGender("male")} />
+        <Option text="Femenino" active={gender === "female"} accent={accent} onPress={() => setGender("female")} />
       </View>
 
-      <Input placeholder="Usuario" onChange={(v: string) => handleChange("username", v)} />
-      <Input placeholder="Contraseña" secure onChange={(v: string) => handleChange("password", v)} />
+      <SectionLabel text="Datos personales" />
+      <Input placeholder="Usuario" value={form.username} onChange={(v) => handleChange("username", v)} />
+      <Input placeholder="Contraseña" value={form.password} secure onChange={(v) => handleChange("password", v)} />
+      <Input placeholder="Primer nombre *" value={form.firstName} onChange={(v) => handleChange("firstName", v)} />
+      <Input placeholder="Segundo nombre" value={form.secondName} onChange={(v) => handleChange("secondName", v)} />
+      <Input placeholder="Primer apellido *" value={form.lastName} onChange={(v) => handleChange("lastName", v)} />
+      <Input placeholder="Segundo apellido" value={form.secondLastName} onChange={(v) => handleChange("secondLastName", v)} />
+      <Input placeholder="Tipo documento (CC)" value={form.documentType} onChange={(v) => handleChange("documentType", v)} />
+      <Input placeholder="Número documento" keyboard="numeric" value={form.documentNumber} onChange={(v) => handleChange("documentNumber", v.replace(/[^0-9]/g, ""))} />
+      <Input placeholder="Celular" keyboard="numeric" value={form.phone} onChange={(v) => handleChange("phone", v.replace(/[^0-9]/g, ""))} />
+      <Input placeholder="Email" keyboard="email-address" value={form.email} onChange={(v) => handleChange("email", v)} />
 
-      <Input placeholder="Primer nombre *" onChange={(v: string) => handleChange("firstName", v)} />
-      <Input placeholder="Segundo nombre" onChange={(v: string) => handleChange("secondName", v)} />
-      <Input placeholder="Primer apellido *" onChange={(v: string) => handleChange("lastName", v)} />
-      <Input placeholder="Segundo apellido" onChange={(v: string) => handleChange("secondLastName", v)} />
-
+      <SectionLabel text="Dirección" />
       <Input
-        placeholder="Número documento"
-        keyboard="numeric"
-        onChange={(v: string) =>
-          handleChange("documentNumber", v.replace(/[^0-9]/g, ""))
-        }
+        placeholder="Dirección principal del servicio"
+        value={form.address}
+        onChange={(v) => handleChange("address", v)}
       />
 
+      <SectionLabel text="Medio de pago" />
+      <View style={styles.columnGap}>
+        {paymentOptions.map((option) => (
+          <Option
+            key={option.id}
+            text={option.label}
+            active={form.paymentMethod === option.id}
+            accent={accent}
+            onPress={() => handleChange("paymentMethod", option.id)}
+          />
+        ))}
+      </View>
       <Input
-        placeholder="Celular"
-        keyboard="numeric"
-        onChange={(v: string) => handleChange("phone", v.replace(/[^0-9]/g, ""))}
+        placeholder="Número de cuenta o Nequi"
+        value={form.accountNumberOrNequi}
+        onChange={(v) => handleChange("accountNumberOrNequi", v)}
       />
 
-      <Input
-        placeholder="Email"
-        keyboard="email-address"
-        onChange={(v: string) => handleChange("email", v)}
-      />
+      <View style={styles.row}>
+        <Option
+          text="Ahorros"
+          active={form.accountType === "ahorros"}
+          accent={accent}
+          onPress={() => handleChange("accountType", "ahorros")}
+        />
+        <Option
+          text="Corriente"
+          active={form.accountType === "corriente"}
+          accent={accent}
+          onPress={() => handleChange("accountType", "corriente")}
+        />
+      </View>
 
-      <TouchableOpacity style={styles.button} onPress={handleRegister}>
+      {role === "barber" && (
+        <>
+          <SectionLabel text="Portafolio (mínimo 3 fotos - URLs)" />
+          <Input placeholder="Foto 1 (URL o ruta)" value={form.portfolio1} onChange={(v) => handleChange("portfolio1", v)} />
+          <Input placeholder="Foto 2 (URL o ruta)" value={form.portfolio2} onChange={(v) => handleChange("portfolio2", v)} />
+          <Input placeholder="Foto 3 (URL o ruta)" value={form.portfolio3} onChange={(v) => handleChange("portfolio3", v)} />
+
+          <SectionLabel text="Cédula de ciudadanía" />
+          <Input placeholder="Cédula frente (URL o ruta)" value={form.idFront} onChange={(v) => handleChange("idFront", v)} />
+          <Input placeholder="Cédula reverso (URL o ruta)" value={form.idBack} onChange={(v) => handleChange("idBack", v)} />
+        </>
+      )}
+
+      <TouchableOpacity style={[styles.button, { backgroundColor: accent }]} onPress={handleRegister}>
         <Text style={styles.buttonText}>Crear cuenta</Text>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.replace("/login")}>
-        <Text style={styles.link}>¿Ya tienes cuenta? Inicia sesión</Text>
+        <Text style={[styles.link, { color: accent }]}>¿Ya tienes cuenta? Inicia sesión</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
-/* COMPONENTES */
+function SectionLabel({ text }: { text: string }) {
+  return <Text style={styles.label}>{text}</Text>;
+}
 
 type InputProps = {
   placeholder: string;
+  value: string;
   onChange: (value: string) => void;
   secure?: boolean;
   keyboard?: "default" | "numeric" | "email-address";
 };
 
-function Input({
-  placeholder,
-  onChange,
-  secure = false,
-  keyboard = "default",
-}: InputProps) {
+function Input({ placeholder, value, onChange, secure = false, keyboard = "default" }: InputProps) {
   return (
     <TextInput
       placeholder={placeholder}
-      placeholderTextColor="#aaa"
+      placeholderTextColor="#888"
       secureTextEntry={secure}
       keyboardType={keyboard}
       style={styles.input}
+      value={value}
       onChangeText={onChange}
     />
   );
@@ -127,83 +263,87 @@ function Input({
 type OptionProps = {
   text: string;
   active: boolean;
+  accent: string;
   onPress: () => void;
 };
 
-function Option({ text, active, onPress }: OptionProps) {
+function Option({ text, active, accent, onPress }: OptionProps) {
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={[styles.option, active && styles.optionActive]}
+      style={[styles.option, { borderColor: accent }, active && { backgroundColor: accent }]}
     >
-      <Text style={styles.optionText}>{text}</Text>
+      <Text style={[styles.optionText, active && { color: "#000" }]}>{text}</Text>
     </TouchableOpacity>
   );
 }
 
-/* ESTILOS */
-
 const styles = StyleSheet.create({
   container: {
-    padding: 24,
-    backgroundColor: "#000",
+    padding: 20,
+    backgroundColor: "#050505",
+    paddingBottom: 36,
   },
   logo: {
-    fontSize: 40,
-    color: "#D4AF37",
+    fontSize: 34,
     textAlign: "center",
-    marginBottom: 10,
-    fontWeight: "bold",
+    marginBottom: 6,
+    fontWeight: "900",
   },
   title: {
     color: "#fff",
-    fontSize: 22,
+    fontSize: 20,
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 18,
+    fontWeight: "700",
   },
   label: {
     color: "#fff",
-    marginTop: 16,
-    marginBottom: 6,
+    marginTop: 14,
+    marginBottom: 8,
+    fontWeight: "700",
   },
   row: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
+  },
+  columnGap: {
+    gap: 8,
   },
   option: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#D4AF37",
-    padding: 10,
-    borderRadius: 6,
-  },
-  optionActive: {
-    backgroundColor: "#D4AF37",
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#101010",
   },
   optionText: {
     textAlign: "center",
-    color: "#000",
-    fontWeight: "bold",
+    color: "#fff",
+    fontWeight: "700",
   },
   input: {
-    backgroundColor: "#fff",
+    backgroundColor: "#171717",
     borderRadius: 8,
-    padding: 14,
-    marginTop: 10,
+    padding: 12,
+    marginTop: 8,
+    color: "#fff",
+    borderWidth: 1,
+    borderColor: "#333",
   },
   button: {
-    backgroundColor: "#D4AF37",
-    padding: 16,
-    borderRadius: 8,
+    padding: 14,
+    borderRadius: 10,
     marginTop: 24,
   },
   buttonText: {
     textAlign: "center",
-    fontWeight: "bold",
+    fontWeight: "900",
+    color: "#000",
   },
   link: {
-    color: "#D4AF37",
     textAlign: "center",
-    marginTop: 20,
+    marginTop: 18,
+    fontWeight: "700",
   },
 });

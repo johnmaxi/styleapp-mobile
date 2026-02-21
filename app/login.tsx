@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
+  Image,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,17 +18,19 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  
+
   const handleLogin = async () => {
     try {
       setLoading(true);
-      console.log("📨 Enviando login...");
       await login(email, password);
       const session = await getSession();
+
       if (session?.user.role === "barber") {
         router.replace("/barber/home");
       } else if (session?.user.role === "client") {
         router.replace("/client/home");
+      } else if (session?.user.role === "admin") {
+        router.replace("/admin");
       } else {
         router.replace("/");
       }
@@ -40,21 +43,31 @@ export default function Login() {
   };
 
   return (
-    <View style={{ padding: 30, flex: 1, justifyContent: "center" }}>
-      <Text style={{ fontSize: 24, marginBottom: 20, textAlign: "center" }}>
-        Iniciar sesión
-      </Text>
+    <View style={{ padding: 24, flex: 1, justifyContent: "center", backgroundColor: "#050505" }}>
+      <View style={{ alignItems: "center", marginBottom: 24 }}>
+        <Image
+          source={require("../assets/logo.png")}
+          style={{ width: 120, height: 120, marginBottom: 12 }}
+          resizeMode="contain"
+        />
+        <Text style={{ fontSize: 28, fontWeight: "900", color: "#D4AF37" }}>STYLEAPP</Text>
+        <Text style={{ color: "#fff", marginTop: 4 }}>Belleza a domicilio con estilo</Text>
+      </View>
 
       <TextInput
         placeholder="Email"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        placeholderTextColor="#8a8a8a"
         style={{
           borderWidth: 1,
-          borderColor: "#000",
+          borderColor: "#D4AF37",
           marginBottom: 10,
-          padding: 10,
+          padding: 12,
+          borderRadius: 10,
+          color: "#fff",
+          backgroundColor: "#0f0f0f",
         }}
       />
 
@@ -62,12 +75,16 @@ export default function Login() {
         placeholder="Password"
         value={password}
         onChangeText={setPassword}
+        placeholderTextColor="#8a8a8a"
         secureTextEntry
         style={{
           borderWidth: 1,
-          borderColor: "#000",
-          marginBottom: 20,
-          padding: 10,
+          borderColor: "#D4AF37",
+          marginBottom: 16,
+          padding: 12,
+          borderRadius: 10,
+          color: "#fff",
+          backgroundColor: "#0f0f0f",
         }}
       />
 
@@ -75,23 +92,22 @@ export default function Login() {
         onPress={handleLogin}
         disabled={loading}
         style={{
-          backgroundColor: "#000",
-          padding: 15,
+          backgroundColor: "#D4AF37",
+          padding: 14,
           alignItems: "center",
           marginBottom: 20,
+          borderRadius: 10,
         }}
       >
-        <Text style={{ color: "#fff", fontSize: 16 }}>
+        <Text style={{ color: "#000", fontSize: 16, fontWeight: "800" }}>
           {loading ? "Ingresando..." : "Ingresar"}
         </Text>
       </TouchableOpacity>
 
-      {/* 👇 OPCIONES VISIBLES (SIN Link, SIN ESTILOS INVISIBLES) */}
-      <TouchableOpacity onPress={() => router.push("/(auth)/register")}>
-        
+      <TouchableOpacity onPress={() => router.push("/(auth)/register")}> 
         <Text
           style={{
-            color: "#000",
+            color: "#D4AF37",
             textAlign: "center",
             fontSize: 16,
             marginBottom: 10,
@@ -105,7 +121,7 @@ export default function Login() {
       <TouchableOpacity onPress={() => router.push("/(auth)/forgot-password")}>
         <Text
           style={{
-            color: "#000",
+            color: "#D4AF37",
             textAlign: "center",
             fontSize: 16,
             textDecorationLine: "underline",
