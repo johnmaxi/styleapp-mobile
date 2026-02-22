@@ -10,10 +10,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import api from "../../api";
 
 type Role = "client" | "barber";
 type Gender = "male" | "female";
-type PaymentMethod = "tarjeta_credito" | "tarjeta_debito" | "nequi" | "pse" | "efectivo";
+type PaymentMethod =
+  | "tarjeta_credito"
+  | "tarjeta_debito"
+  | "nequi"
+  | "pse"
+  | "efectivo";
 type AccountType = "ahorros" | "corriente";
 
 type RegisterForm = {
@@ -65,6 +71,7 @@ export default function RegisterScreen() {
   const [role, setRole] = useState<Role>("client");
   const [gender, setGender] = useState<Gender>("male");
   const [form, setForm] = useState<RegisterForm>(initialForm);
+  const [loading, setLoading] = useState(false);
 
   const accent = gender === "male" ? "#D4AF37" : "#B026FF";
 
@@ -92,10 +99,6 @@ export default function RegisterScreen() {
       return "La dirección es obligatoria";
     }
 
-    if (!["efectivo", "pse", "nequi", "tarjeta_credito", "tarjeta_debito"].includes(form.paymentMethod)) {
-      return "Selecciona un medio de pago válido";
-    }
-
     if (!form.accountNumberOrNequi.trim()) {
       return "Debes ingresar número de cuenta o número Nequi";
     }
@@ -121,28 +124,64 @@ export default function RegisterScreen() {
       return;
     }
 
-    const payload = { role, gender, ...form };
-    console.log("REGISTRO:", payload);
+    setLoading(true);
+    try {
+      const fullName = `${form.firstName} ${form.secondName} ${form.lastName} ${form.secondLastName}`
+        .replace(/\s+/g, " ")
+        .trim();
 
-    await SecureStore.setItemAsync(
-      "styleapp_profile_defaults",
-      JSON.stringify({
+      const payload = {
+        name: fullName,
+        username: form.username,
+        email: form.email,
+        password: form.password,
+        phone: form.phone,
+        role,
+        gender,
         address: form.address,
-        paymentMethod: form.paymentMethod,
-        accountNumberOrNequi: form.accountNumberOrNequi,
-        accountType: form.accountType,
-      })
-    );
+        payment_method: form.paymentMethod,
+        account_number: form.accountNumberOrNequi,
+        account_type: form.accountType,
+        document_type: form.documentType,
+        document_number: form.documentNumber,
+        portfolio: role === "barber" ? [form.portfolio1, form.portfolio2, form.portfolio3] : [],
+        id_front: role === "barber" ? form.idFront : null,
+        id_back: role === "barber" ? form.idBack : null,
+      };
 
-    Alert.alert(
-      "Registro local guardado",
-      "Los datos extra quedaron listos para autocompletar futuras solicitudes."
-    );
-    router.replace("/login");
+      await api.post("/auth/register", payload);
+
+      await SecureStore.setItemAsync(
+        "styleapp_profile_defaults",
+        JSON.stringify({
+          address: form.address,
+          paymentMethod: form.paymentMethod,
+          accountNumberOrNequi: form.accountNumberOrNequi,
+          accountType: form.accountType,
+        })
+      );
+
+      Alert.alert("Registro exitoso", "Tu usuario fue creado. Ahora inicia sesión.");
+      router.replace("/login");
+    } catch (err: any) {
+      console.log("❌ ERROR REGISTRO:", err?.response?.data || err.message);
+      const statusCode = err?.response?.status;
+      if (statusCode === 404) {
+        Alert.alert(
+          "Backend incompleto",
+          "Tu backend no expone POST /auth/register. Debes implementar esa ruta para guardar usuarios en base de datos."
+        );
+      } else {
+        Alert.alert("Error", err?.response?.data?.error || "No se pudo registrar el usuario");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Registro</Text>
       <Text style={[styles.logo, { color: accent }]}>✂️ STYLEAPP</Text>
       <Text style={styles.title}>Registro de usuario</Text>
 
@@ -171,11 +210,7 @@ export default function RegisterScreen() {
       <Input placeholder="Email" keyboard="email-address" value={form.email} onChange={(v) => handleChange("email", v)} />
 
       <SectionLabel text="Dirección" />
-      <Input
-        placeholder="Dirección principal del servicio"
-        value={form.address}
-        onChange={(v) => handleChange("address", v)}
-      />
+      <Input placeholder="Dirección principal del servicio" value={form.address} onChange={(v) => handleChange("address", v)} />
 
       <SectionLabel text="Medio de pago" />
       <View style={styles.columnGap}>
@@ -189,25 +224,11 @@ export default function RegisterScreen() {
           />
         ))}
       </View>
-      <Input
-        placeholder="Número de cuenta o Nequi"
-        value={form.accountNumberOrNequi}
-        onChange={(v) => handleChange("accountNumberOrNequi", v)}
-      />
+      <Input placeholder="Número de cuenta o Nequi" value={form.accountNumberOrNequi} onChange={(v) => handleChange("accountNumberOrNequi", v)} />
 
       <View style={styles.row}>
-        <Option
-          text="Ahorros"
-          active={form.accountType === "ahorros"}
-          accent={accent}
-          onPress={() => handleChange("accountType", "ahorros")}
-        />
-        <Option
-          text="Corriente"
-          active={form.accountType === "corriente"}
-          accent={accent}
-          onPress={() => handleChange("accountType", "corriente")}
-        />
+        <Option text="Ahorros" active={form.accountType === "ahorros"} accent={accent} onPress={() => handleChange("accountType", "ahorros")} />
+        <Option text="Corriente" active={form.accountType === "corriente"} accent={accent} onPress={() => handleChange("accountType", "corriente")} />
       </View>
 
       {role === "barber" && (
@@ -223,8 +244,8 @@ export default function RegisterScreen() {
         </>
       )}
 
-      <TouchableOpacity style={[styles.button, { backgroundColor: accent }]} onPress={handleRegister}>
-        <Text style={styles.buttonText}>Crear cuenta</Text>
+      <TouchableOpacity style={[styles.button, { backgroundColor: accent, opacity: loading ? 0.7 : 1 }]} onPress={handleRegister} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? "Creando..." : "Crear cuenta"}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.replace("/login")}>

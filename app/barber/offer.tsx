@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Text, TextInput, TouchableOpacity, View } from "react-native";
 import api from "../../api";
+import { useAuth } from "../../context/AuthContext";
 
 type Bid = {
   id: number;
@@ -12,43 +13,112 @@ type Bid = {
 
 export default function Offer() {
   const router = useRouter();
+  const { user } = useAuth();
   const { id, price } = useLocalSearchParams<{ id: string; price?: string }>();
   const [counterPrice, setCounterPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [isActive, setIsActive] = useState(true);
+  const lastStatusRef = useRef<string | null>(null);
+
+  const fetchMyBidsForRequest = useCallback(
+    async (requestId: string) => {
+      const endpoints = [
+        `/bids/barber/request/${requestId}`,
+        `/bids/me/request/${requestId}`,
+        `/bids/my/request/${requestId}`,
+        `/bids/request/${requestId}`,
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await api.get(endpoint);
+          const bids: Bid[] = Array.isArray(res.data)
+            ? res.data
+            : Array.isArray(res.data?.data)
+              ? res.data.data
+              : [];
+
+          if (endpoint === `/bids/request/${requestId}` && user?.id) {
+            return bids.filter((bid) => Number(bid.barber_id) === Number(user.id));
+          }
+
+          return bids;
+        } catch {
+          // try next endpoint
+        }
+      }
+
+      return [];
+    },
+    [user?.id]
+  );
 
   useEffect(() => {
     let mounted = true;
 
-    async function checkPending() {
+    async function checkBidState() {
       if (!id) return;
 
       try {
         const activeFlag = await SecureStore.getItemAsync("barber_is_active");
         setIsActive(activeFlag !== "0");
 
-        const res = await api.get(`/bids/request/${id}`);
-        const bids: Bid[] = Array.isArray(res.data)
-          ? res.data
-          : Array.isArray(res.data?.data)
-            ? res.data.data
-            : [];
-
+        const bids = await fetchMyBidsForRequest(id);
         if (!mounted) return;
 
-        const hasPending = bids.some((bid) => bid.status === "pending");
-        setBlocked(hasPending);
+        const myPending = bids.find((bid) => bid.status === "pending");
+        const myAccepted = bids.find((bid) => bid.status === "accepted");
+        const myRejected = bids.find((bid) => bid.status === "rejected");
+
+        setBlocked(Boolean(myPending));
+
+        if (myAccepted && lastStatusRef.current !== "accepted") {
+          lastStatusRef.current = "accepted";
+          Alert.alert(
+            "✅ Oferta aceptada",
+            "El cliente aceptó tu contraoferta. Se abrió tu servicio activo.",
+            [
+              {
+                text: "Ir a servicio activo",
+                onPress: () =>
+                  router.replace({
+                    pathname: "/barber/active",
+                    params: {
+                      id,
+                      price: String(price || "0"),
+                      status: "accepted",
+                    },
+                  }),
+              },
+            ]
+          );
+        }
+
+        if (myRejected && lastStatusRef.current !== "rejected") {
+          lastStatusRef.current = "rejected";
+          Alert.alert(
+            "❌ Contraoferta rechazada",
+            "El cliente rechazó tu contraoferta. Puedes enviar una nueva mientras la solicitud siga abierta."
+          );
+        }
+
+        if (myPending && lastStatusRef.current !== "pending") {
+          lastStatusRef.current = "pending";
+        }
       } catch (err: any) {
         console.log("❌ ERROR VALIDANDO BIDS:", err?.response?.data || err.message);
       }
     }
 
-    checkPending();
+    checkBidState();
+    const timer = setInterval(checkBidState, 5000);
+
     return () => {
       mounted = false;
+      clearInterval(timer);
     };
-  }, [id]);
+  }, [fetchMyBidsForRequest, id, price, router]);
 
   const sendCounterOffer = async () => {
     if (!id) {
@@ -81,11 +151,13 @@ export default function Offer() {
         amount: Number(counterPrice),
       });
 
+      lastStatusRef.current = "pending";
+      setBlocked(true);
+
       Alert.alert(
         "Contraoferta enviada",
-        "El cliente podrá aceptarla o rechazarla."
+        "El cliente podrá aceptarla o rechazarla. Te notificaremos en esta pantalla."
       );
-      router.replace("/barber/jobs");
     } catch (err: any) {
       console.log("❌ ERROR CONTRAOFERTA:", err?.response?.data || err.message);
       Alert.alert(
@@ -131,7 +203,12 @@ export default function Offer() {
       <TouchableOpacity
         onPress={sendCounterOffer}
         disabled={loading || blocked || !isActive}
-        style={{ backgroundColor: "#111", padding: 14, borderRadius: 8, opacity: loading || blocked || !isActive ? 0.6 : 1 }}
+        style={{
+          backgroundColor: "#111",
+          padding: 14,
+          borderRadius: 8,
+          opacity: loading || blocked || !isActive ? 0.6 : 1,
+        }}
       >
         <Text style={{ color: "white", textAlign: "center" }}>
           {loading ? "Enviando..." : "Enviar contraoferta"}
