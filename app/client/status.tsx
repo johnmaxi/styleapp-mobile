@@ -34,7 +34,16 @@ type Bid = {
 
 export default function ClientStatus() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    service_type?: string;
+    address?: string;
+    price?: string;
+    latitude?: string;
+    longitude?: string;
+    status?: string;
+  }>();
+  const { id } = params;
   const { user } = useAuth();
   const palette = getPalette(user?.gender);
 
@@ -51,23 +60,86 @@ export default function ClientStatus() {
         ? bidsRes.data.data
         : [];
   };
+  const getRequestById = async (requestId: number): Promise<ServiceRequest | null> => {
+    const candidates = [
+      `/service-requests/${requestId}`,
+      `/service-request/${requestId}`,
+    ];
+
+    for (const path of candidates) {
+      try {
+        const res = await api.get(path);
+        const data = Array.isArray(res.data)
+          ? res.data[0]
+          : res.data?.data || res.data?.request || res.data;
+        if (data && typeof data === "object") {
+          return data as ServiceRequest;
+        }
+      } catch (err: any) {
+        if (err?.response?.status !== 404) {
+          throw err;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const getClientRequests = async (): Promise<ServiceRequest[]> => {
+    const candidates = [
+      "/service-requests/mine",
+      "/service-request/mine",
+      "/service-requests",
+      "/service-request",
+    ];
+
+    for (const path of candidates) {
+      try {
+        const res = await api.get(path);
+        const rows = Array.isArray(res.data)
+          ? res.data
+          : Array.isArray(res.data?.data)
+            ? res.data.data
+            : [];
+        if (rows.length > 0) {
+          return rows as ServiceRequest[];
+        }
+      } catch (err: any) {
+        if (err?.response?.status !== 404) {
+          throw err;
+        }
+      }
+    }
+
+    return [];
+  };
 
   const loadStatus = useCallback(async () => {
     try {
-      const listRes = await api.get("/service-requests");
-      const allRequests: ServiceRequest[] = Array.isArray(listRes.data)
-        ? listRes.data
-        : Array.isArray(listRes.data?.data)
-          ? listRes.data.data
-          : [];
-
       let current: ServiceRequest | undefined;
       let currentBids: Bid[] = [];
 
       if (id) {
-        current = allRequests.find((r) => r.id === Number(id));
-        if (current) currentBids = await getBidsForRequest(current.id);
+        const requestId = Number(id);
+        const byId = await getRequestById(requestId);
+        if (byId) {
+          current = byId;
+        } else {
+          current = {
+            id: requestId,
+            service_type: params.service_type,
+            address: params.address,
+            price: params.price ? Number(params.price) : undefined,
+            latitude: params.latitude ? Number(params.latitude) : undefined,
+            longitude: params.longitude ? Number(params.longitude) : undefined,
+            status: (params.status as ServiceRequest["status"]) || "open",
+          };
+        }
+
+        currentBids = await getBidsForRequest(requestId);
       }
+
+      const allRequests: ServiceRequest[] = current ? [] : await getClientRequests();
 
       if (!current) {
         const ordered = [...allRequests].sort((a, b) => b.id - a.id);
@@ -104,7 +176,7 @@ export default function ClientStatus() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, params.address, params.latitude, params.longitude, params.price, params.service_type, params.status]);
 
   useEffect(() => {
     loadStatus();

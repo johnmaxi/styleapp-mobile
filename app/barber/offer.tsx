@@ -11,6 +11,8 @@ type Bid = {
   status: "pending" | "accepted" | "rejected";
 };
 
+type RequestItem = { id: number; status?: string; assigned_barber_id?: number };
+
 export default function Offer() {
   const router = useRouter();
   const { user } = useAuth();
@@ -19,7 +21,9 @@ export default function Offer() {
   const [loading, setLoading] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [isActive, setIsActive] = useState(true);
+
   const lastStatusRef = useRef<string | null>(null);
+  const prevHadPendingRef = useRef(false);
 
   const fetchMyBidsForRequest = useCallback(
     async (requestId: string) => {
@@ -54,6 +58,55 @@ export default function Offer() {
     [user?.id]
   );
 
+  const getAssignedService = useCallback(async () => {
+    const endpoints = [
+      "/service-requests/assigned/me",
+      "/service-requests/active/me",
+      "/service-requests/my-active",
+      "/service-requests",
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await api.get(endpoint);
+        const payload = res.data;
+        const list: RequestItem[] = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : payload?.data
+              ? [payload.data]
+              : [];
+
+        const assigned = list.find(
+          (item) =>
+            Number(item.id) === Number(id) &&
+            (item.status === "accepted" || item.status === "on_route")
+        );
+        if (assigned) return assigned;
+      } catch {
+        // try next
+      }
+    }
+
+    return null;
+  }, [id]);
+
+  const isRequestOpen = useCallback(async () => {
+    try {
+      const res = await api.get("/service-requests/open");
+      const payload = res.data;
+      const list: RequestItem[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+      return list.some((r) => Number(r.id) === Number(id));
+    } catch {
+      return false;
+    }
+  }, [id]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -64,7 +117,12 @@ export default function Offer() {
         const activeFlag = await SecureStore.getItemAsync("barber_is_active");
         setIsActive(activeFlag !== "0");
 
-        const bids = await fetchMyBidsForRequest(id);
+        const [bids, assignedForMe, requestOpen] = await Promise.all([
+          fetchMyBidsForRequest(id),
+          getAssignedService(),
+          isRequestOpen(),
+        ]);
+
         if (!mounted) return;
 
         const myPending = bids.find((bid) => bid.status === "pending");
@@ -73,11 +131,20 @@ export default function Offer() {
 
         setBlocked(Boolean(myPending));
 
-        if (myAccepted && lastStatusRef.current !== "accepted") {
+        if (myPending) {
+          prevHadPendingRef.current = true;
+          if (lastStatusRef.current !== "pending") {
+            lastStatusRef.current = "pending";
+          }
+        }
+
+        const acceptedDetected = Boolean(myAccepted) || Boolean(assignedForMe);
+        if (acceptedDetected && lastStatusRef.current !== "accepted") {
           lastStatusRef.current = "accepted";
+          prevHadPendingRef.current = false;
           Alert.alert(
             "✅ Oferta aceptada",
-            "El cliente aceptó tu contraoferta. Se abrió tu servicio activo.",
+            "El cliente aceptó tu contraoferta. Ya tienes este servicio en activo.",
             [
               {
                 text: "Ir a servicio activo",
@@ -93,18 +160,20 @@ export default function Offer() {
               },
             ]
           );
+          return;
         }
 
-        if (myRejected && lastStatusRef.current !== "rejected") {
+        const rejectedDetected =
+          Boolean(myRejected) || (prevHadPendingRef.current && !myPending && requestOpen);
+
+        if (rejectedDetected && lastStatusRef.current !== "rejected") {
           lastStatusRef.current = "rejected";
+          prevHadPendingRef.current = false;
+          setBlocked(false);
           Alert.alert(
             "❌ Contraoferta rechazada",
-            "El cliente rechazó tu contraoferta. Puedes enviar una nueva mientras la solicitud siga abierta."
+            "El cliente rechazó tu contraoferta. Ya puedes enviar una nueva propuesta."
           );
-        }
-
-        if (myPending && lastStatusRef.current !== "pending") {
-          lastStatusRef.current = "pending";
         }
       } catch (err: any) {
         console.log("❌ ERROR VALIDANDO BIDS:", err?.response?.data || err.message);
@@ -118,7 +187,7 @@ export default function Offer() {
       mounted = false;
       clearInterval(timer);
     };
-  }, [fetchMyBidsForRequest, id, price, router]);
+  }, [fetchMyBidsForRequest, getAssignedService, id, isRequestOpen, price, router]);
 
   const sendCounterOffer = async () => {
     if (!id) {
@@ -152,6 +221,7 @@ export default function Offer() {
       });
 
       lastStatusRef.current = "pending";
+      prevHadPendingRef.current = true;
       setBlocked(true);
 
       Alert.alert(

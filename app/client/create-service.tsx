@@ -95,6 +95,102 @@ export default function CreateService() {
     );
   };
 
+  const createRequestWithFallback = async (payload: {
+    service_type: string;
+    price: number;
+    address: string;
+    latitude: number | null;
+    longitude: number | null;
+  }) => {
+    const baseURL = String(api.defaults.baseURL || "").replace(/\/$/, "");
+    const baseNoApi = baseURL.replace(/\/api$/, "");
+
+    const endpointCandidates = [
+      "/service-requests",
+      "/service-requests/create",
+      "/service-request",
+      "/service-request/create",
+      "/jobrequest",
+      `${baseNoApi}/service-requests`,
+      `${baseNoApi}/service-requests/create`,
+      `${baseNoApi}/service-request`,
+      `${baseNoApi}/service-request/create`,
+      `${baseNoApi}/jobrequest`,
+      `${baseNoApi}/api/service-requests`,
+      `${baseNoApi}/api/service-requests/create`,
+      `${baseNoApi}/api/service-request`,
+      `${baseNoApi}/api/service-request/create`,
+      `${baseNoApi}/api/jobrequest`,
+    ];
+
+    const attemptedEndpoints: string[] = [];
+    const attemptedSet = new Set<string>();
+    let lastError: any = null;
+
+    for (const endpoint of endpointCandidates) {
+      try {
+        const resolved = endpoint.startsWith("http")
+          ? endpoint
+          : `${baseURL}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
+
+        if (attemptedSet.has(resolved)) {
+          continue;
+        }
+        attemptedSet.add(resolved);
+        attemptedEndpoints.push(resolved);
+        console.log("🧪 PROBANDO ENDPOINT CREAR:", resolved);
+
+        const res = endpoint.startsWith("http")
+          ? await api.post(endpoint, payload, { baseURL: "" })
+          : await api.post(endpoint, payload);
+
+        return res;
+      } catch (err: any) {
+        const statusCode = err?.response?.status;
+        console.log(
+          "⚠️ FALLÓ ENDPOINT CREAR:",
+          endpoint,
+          statusCode,
+          err?.response?.data || err.message
+        );
+        if (statusCode !== 404) {
+          throw err;
+        }
+        lastError = err;
+      }
+    }
+
+    const fallbackError =
+      lastError || new Error("No existe endpoint para crear solicitud");
+    (fallbackError as any).attemptedEndpoints = attemptedEndpoints;
+    (fallbackError as any).baseURL = api.defaults.baseURL;
+    throw fallbackError;
+  };
+
+  const diagnoseMountedRoutes = async () => {
+    const checks = [
+      "/",
+      "/service-request",
+      "/service-requests",
+      "/service-requests/open",
+      "/api/service-requests",
+      "/api/service-requests/open",
+    ];
+
+    const results: string[] = [];
+
+    for (const path of checks) {
+      try {
+        const res = await api.get(path, { validateStatus: () => true });
+        results.push(`${path} => ${res.status}`);
+      } catch {
+        results.push(`${path} => network_error`);
+      }
+    }
+
+    return results;
+  };
+
   const handleCreate = async () => {
     try {
       if (services.length === 0) {
@@ -126,7 +222,7 @@ export default function CreateService() {
         }
       }
 
-      const res = await api.post("/service-requests", {
+      const res = await createRequestWithFallback({
         service_type: services.join(","),
         price: Number(price),
         address,
@@ -143,14 +239,35 @@ export default function CreateService() {
 
       router.replace({
         pathname: "/client/status",
-        params: createdId ? { id: String(createdId) } : undefined,
+        params: createdId
+          ? {
+              id: String(createdId),
+              service_type: services.join(","),
+              address,
+              price: String(Number(price)),
+              latitude: lat != null ? String(lat) : undefined,
+              longitude: lng != null ? String(lng) : undefined,
+              status: "open",
+            }
+          : undefined,
       });
     } catch (err: any) {
       console.log("🔥 ERROR CREAR SERVICIO:", err?.response?.data || err.message);
-      Alert.alert(
-        "Error",
-        err?.response?.data?.error || "No se pudo crear el servicio"
-      );
+      const statusCode = err?.response?.status;
+      if (statusCode === 404) {
+        const attempted = (err as any)?.attemptedEndpoints;
+        const baseURL = (err as any)?.baseURL || api.defaults.baseURL;
+        const diagnostics = await diagnoseMountedRoutes();
+        Alert.alert(
+          "Endpoint no encontrado",
+          `No se encontró ruta para crear solicitud.\n\nBaseURL app: ${baseURL}\nRutas probadas: ${Array.isArray(attempted) ? attempted.join(", ") : "(sin datos)"}\nDiagnóstico rápido: ${diagnostics.join(" | ")}\n\nVerifica en el proceso backend ACTIVO:\n1) app.use('/api/service-requests', serviceRequestRoutes)\n2) router.post('/', controller.create) (o '/create') dentro de service-request.routes.js\n3) confirma que serviceRequestRoutes se exporta/importa sin errores\n4) reinicia el backend después de cambios.`
+        );
+      } else {
+        Alert.alert(
+          "Error",
+          err?.response?.data?.error || "No se pudo crear el servicio"
+        );
+      }
     } finally {
       setLoading(false);
     }
