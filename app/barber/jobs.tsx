@@ -45,14 +45,41 @@ export default function Jobs() {
       }
 
       setIsActive(true);
-      const res = await api.get("/service-requests/open");
 
-      const payload = res.data;
-      const list = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : [];
+      const endpoints = [
+        "/service-requests/open",
+        "/service-request/open",
+        "/service-requests",
+        "/service-request",
+      ];
+
+      let list: RequestItem[] = [];
+      let lastError: any = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await api.get(endpoint);
+          const payload = res.data;
+          const rows: RequestItem[] = Array.isArray(payload)
+            ? payload
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : [];
+
+          list = rows.filter((item) => item.status === "open");
+          break;
+        } catch (err: any) {
+          lastError = err;
+          const statusCode = err?.response?.status;
+          if (statusCode !== 404 && statusCode !== 403) {
+            throw err;
+          }
+        }
+      }
+
+      if (!list.length && lastError?.response?.status === 403) {
+        throw lastError;
+      }
 
       setRequests(list);
 
@@ -60,7 +87,15 @@ export default function Jobs() {
       await setBarberStats({ ...currentStats, open: list.length });
     } catch (err: any) {
       console.log("❌ ERROR CARGANDO OFERTAS:", err?.response?.data || err.message);
-      Alert.alert("Error", err?.response?.data?.error || "No se pudieron cargar ofertas disponibles");
+      const statusCode = err?.response?.status;
+      if (statusCode === 403) {
+        Alert.alert(
+          "Backend pendiente",
+          "Tu backend está respondiendo 'Solo clientes' para listar solicitudes abiertas. Debes habilitar GET /service-requests/open para rol barber."
+        );
+      } else {
+        Alert.alert("Error", err?.response?.data?.error || "No se pudieron cargar ofertas disponibles");
+      }
     } finally {
       setLoading(false);
     }
