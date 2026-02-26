@@ -114,11 +114,6 @@ export default function Jobs() {
       });
       await markAssigned();
 
-      Alert.alert(
-        "Solicitud aceptada",
-        "La solicitud cambió a estado accepted."
-      );
-
       router.push({
         pathname: "/barber/active",
         params: {
@@ -133,10 +128,24 @@ export default function Jobs() {
       });
     } catch (err: any) {
       console.log("❌ ERROR ACEPTANDO SOLICITUD:", err?.response?.data || err.message);
-      Alert.alert(
-        "Error",
-        err?.response?.data?.error || "No fue posible aceptar la solicitud"
-      );
+
+      const statusCode = err?.response?.status;
+      const errorMsg = err?.response?.data?.error;
+
+      if (statusCode === 409) {
+        // Otro barbero tomó la solicitud primero — eliminarla de la lista local
+        setRequests((prev) => prev.filter((r) => r.id !== item.id));
+        Alert.alert(
+          "Solicitud no disponible",
+          "Otro barbero tomó esta solicitud primero. Se eliminó de tu lista.",
+          [{ text: "OK" }]
+        );
+      } else {
+        Alert.alert(
+          "Error",
+          errorMsg || "No fue posible aceptar la solicitud"
+        );
+      }
     } finally {
       setActionLoadingId(null);
     }
@@ -177,7 +186,12 @@ export default function Jobs() {
           <TouchableOpacity
             onPress={() => acceptRequest(item)}
             disabled={actionLoadingId === item.id}
-            style={{ backgroundColor: "#0A7E07", padding: 12, marginTop: 10, borderRadius: 8 }}
+            style={{
+              backgroundColor: actionLoadingId === item.id ? "#aaa" : "#0A7E07",
+              padding: 12,
+              marginTop: 10,
+              borderRadius: 8,
+            }}
           >
             <Text style={{ color: "#fff", textAlign: "center" }}>
               {actionLoadingId === item.id ? "Aceptando..." : "Aceptar oferta"}
@@ -194,9 +208,9 @@ export default function Jobs() {
                 },
               })
             }
-            style={{ backgroundColor: "#111", padding: 12, marginTop: 8, borderRadius: 8 }}
+            style={{ backgroundColor: "#d4b630", padding: 12, marginTop: 8, borderRadius: 8 }}
           >
-            <Text style={{ color: "#fff", textAlign: "center" }}>Enviar contraoferta</Text>
+            <Text style={{ color: "#040a18", textAlign: "center" }}>Enviar contraoferta</Text>
           </TouchableOpacity>
         </View>
       ))}
