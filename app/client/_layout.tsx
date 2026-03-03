@@ -1,10 +1,6 @@
-import { AuthProvider } from "@/context/AuthContext";
-import { Stack } from "expo-router";
+// app/client/_layout.tsx
+import { Slot } from "expo-router";
 
-export default function RootLayout() {
-  return (
-    <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }} />
-    </AuthProvider>
-  );
+export default function ClientLayout() {
+  return <Slot />;
 }

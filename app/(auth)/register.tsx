@@ -1,8 +1,11 @@
+// app/(auth)/register.tsx
+import { showImageOptions } from "@/utils/imageUtils";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,240 +15,313 @@ import {
 } from "react-native";
 import api from "../../api";
 
-type Role = "client" | "barber";
+type Role = "client" | "barber" | "estilista" | "quiropodologo";
 type Gender = "male" | "female";
-type PaymentMethod =
-  | "tarjeta_credito"
-  | "tarjeta_debito"
-  | "nequi"
-  | "pse"
-  | "efectivo";
-type AccountType = "ahorros" | "corriente";
+type PaymentMethod = "nequi" | "pse" | "efectivo";
 
-type RegisterForm = {
-  username: string;
-  password: string;
-  firstName: string;
-  secondName: string;
-  lastName: string;
-  secondLastName: string;
-  documentType: string;
-  documentNumber: string;
-  phone: string;
-  email: string;
-  address: string;
-  paymentMethod: PaymentMethod;
-  accountNumberOrNequi: string;
-  accountType: AccountType;
-  portfolio1: string;
-  portfolio2: string;
-  portfolio3: string;
-  idFront: string;
-  idBack: string;
+const ROLE_OPTIONS: { id: Role; label: string; subtitle: string }[] = [
+  { id: "client", label: "Cliente", subtitle: "Voy a solicitar servicios" },
+  { id: "barber", label: "Barbero", subtitle: "Ofreceré mis servicios como Barbero(a)" },
+  { id: "estilista", label: "Estilista", subtitle: "Ofreceré mis servicios como Estilista" },
+  { id: "quiropodologo", label: "Quiropodólogo", subtitle: "Ofreceré mis servicios como Quiropodologo(a)" },
+];
+
+const DOCUMENT_TYPES = ["Cédula de ciudadanía", "Pasaporte", "Cédula Extranjería"];
+const CITIES = ["Medellín", "Bogotá", "Cali"];
+const NEIGHBORHOODS: Record<string, string[]> = {
+  "Medellín": ["Belén las Violetas", "Belén los Alpes", "Belén Rincón", "Rosales", "Laureles", "Poblado"],
+  "Bogotá": ["Chapinero", "Usaquén", "Suba", "Kennedy", "Bosa"],
+  "Cali": ["El Peñon", "San Fernando", "Granada", "Ciudad Jardín", "El Ingenio"],
 };
 
-const initialForm: RegisterForm = {
-  username: "",
-  password: "",
-  firstName: "",
-  secondName: "",
-  lastName: "",
-  secondLastName: "",
-  documentType: "CC",
-  documentNumber: "",
-  phone: "",
-  email: "",
-  address: "",
-  paymentMethod: "nequi",
-  accountNumberOrNequi: "",
-  accountType: "ahorros",
-  portfolio1: "",
-  portfolio2: "",
-  portfolio3: "",
-  idFront: "",
-  idBack: "",
-};
+const isProfessional = (role: Role) => role !== "client";
 
 export default function RegisterScreen() {
   const router = useRouter();
   const [role, setRole] = useState<Role>("client");
   const [gender, setGender] = useState<Gender>("male");
-  const [form, setForm] = useState<RegisterForm>(initialForm);
   const [loading, setLoading] = useState(false);
 
-  const accent = gender === "male" ? "#D4AF37" : "#B026FF";
+  const [firstName, setFirstName] = useState("");
+  const [secondName, setSecondName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [secondLastName, setSecondLastName] = useState("");
+  const [docType, setDocType] = useState("Cédula de ciudadanía");
+  const [docNumber, setDocNumber] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("Medellín");
+  const [neighborhood, setNeighborhood] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("nequi");
+  const [accountNumber, setAccountNumber] = useState("");
 
-  const paymentOptions = useMemo(
-    () => [
-      { id: "tarjeta_credito", label: "Tarjeta de crédito" },
-      { id: "tarjeta_debito", label: "Tarjeta débito" },
-      { id: "nequi", label: "Nequi" },
-      { id: "pse", label: "PSE" },
-      { id: "efectivo", label: "Efectivo" },
-    ] satisfies { id: PaymentMethod; label: string }[],
-    []
-  );
+  // Fotos — guardadas como base64 comprimido
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [portfolio, setPortfolio] = useState<(string | null)[]>([null, null, null]);
+  const [idFront, setIdFront] = useState<string | null>(null);
+  const [idBack, setIdBack] = useState<string | null>(null);
+  const [diploma, setDiploma] = useState<string | null>(null);
 
-  const handleChange = (key: keyof RegisterForm, value: string) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  // Dropdowns
+  const [showDocType, setShowDocType] = useState(false);
+  const [showCity, setShowCity] = useState(false);
+  const [showNeighborhood, setShowNeighborhood] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
+
+  const accent = gender === "male" ? "#D4AF37" : "#FF69B4";
+  const onlyLetters = (v: string) => v.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, "");
+
+  const updatePortfolio = (index: number, value: string) => {
+    setPortfolio((prev) => {
+      const copy = [...prev];
+      copy[index] = value;
+      return copy;
+    });
   };
 
-  const validate = () => {
-    if (!form.firstName || !form.lastName || !form.email || !form.password) {
-      return "Completa nombre, apellido, email y contraseña";
+  const validate = (): string | null => {
+    if (!firstName.trim()) return "El primer nombre es obligatorio";
+    if (!lastName.trim()) return "El primer apellido es obligatorio";
+    if (!email.trim()) return "El email es obligatorio";
+    if (!password.trim()) return "La contraseña es obligatoria";
+    if (!docNumber.trim()) return "El número de documento es obligatorio";
+    if (!phone.trim()) return "El celular es obligatorio";
+    if (!address.trim()) return "La dirección es obligatoria";
+    if (!city) return "Selecciona una ciudad";
+    if (!neighborhood) return "Selecciona un barrio";
+    if (!accountNumber.trim()) return "Ingresa número de cuenta o Nequi";
+    if (!profilePhoto) return "La foto de perfil es obligatoria";
+    if (isProfessional(role)) {
+      if (portfolio.filter(Boolean).length < 3) return "Debes cargar 3 fotos del portafolio";
+      if (!idFront) return "Adjunta la cédula por el frente";
+      if (!idBack) return "Adjunta la cédula por el reverso";
+      if (role === "quiropodologo" && !diploma) return "El diploma es obligatorio para Quiropodólogo";
     }
-
-    if (!form.address.trim()) {
-      return "La dirección es obligatoria";
-    }
-
-    if (!form.accountNumberOrNequi.trim()) {
-      return "Debes ingresar número de cuenta o número Nequi";
-    }
-
-    if (role === "barber") {
-      const portfolio = [form.portfolio1, form.portfolio2, form.portfolio3].filter(Boolean);
-      if (portfolio.length < 3) {
-        return "Para barbero debes cargar mínimo 3 fotos del portafolio";
-      }
-
-      if (!form.idFront.trim() || !form.idBack.trim()) {
-        return "Para barbero debes adjuntar cédula por ambos lados";
-      }
-    }
-
     return null;
   };
 
   const handleRegister = async () => {
     const error = validate();
-    if (error) {
-      Alert.alert("Validación", error);
-      return;
-    }
+    if (error) { Alert.alert("Campos incompletos", error); return; }
 
     setLoading(true);
     try {
-      const fullName = `${form.firstName} ${form.secondName} ${form.lastName} ${form.secondLastName}`
-        .replace(/\s+/g, " ")
-        .trim();
+      const fullName = `${firstName} ${secondName} ${lastName} ${secondLastName}`
+        .replace(/\s+/g, " ").trim();
 
-      const payload = {
+      const payload: Record<string, any> = {
         name: fullName,
-        username: form.username,
-        email: form.email,
-        password: form.password,
-        phone: form.phone,
+        username,
+        email,
+        password,
+        phone,
         role,
         gender,
-        address: form.address,
-        payment_method: form.paymentMethod,
-        account_number: form.accountNumberOrNequi,
-        account_type: form.accountType,
-        document_type: form.documentType,
-        document_number: form.documentNumber,
-        portfolio: role === "barber" ? [form.portfolio1, form.portfolio2, form.portfolio3] : [],
-        id_front: role === "barber" ? form.idFront : null,
-        id_back: role === "barber" ? form.idBack : null,
+        address: `${address}, ${neighborhood}, ${city}`,
+        city,
+        neighborhood,
+        payment_method: paymentMethod,
+        account_number: accountNumber,
+        document_type: docType,
+        document_number: docNumber,
+        profile_photo: profilePhoto,
       };
+
+      // Solo enviar fotos de profesionales si aplica
+      if (isProfessional(role)) {
+        payload.portfolio = portfolio.filter(Boolean);
+        payload.id_front = idFront;
+        payload.id_back = idBack;
+        payload.diploma = diploma || null;
+      } else {
+        payload.portfolio = [];
+      }
 
       await api.post("/auth/register", payload);
 
-      await SecureStore.setItemAsync(
-        "styleapp_profile_defaults",
-        JSON.stringify({
-          address: form.address,
-          paymentMethod: form.paymentMethod,
-          accountNumberOrNequi: form.accountNumberOrNequi,
-          accountType: form.accountType,
-        })
-      );
+      await SecureStore.setItemAsync("styleapp_profile_defaults", JSON.stringify({
+        address, city, neighborhood, paymentMethod, accountNumber,
+      }));
 
-      Alert.alert("Registro exitoso", "Tu usuario fue creado. Ahora inicia sesión.");
+      Alert.alert("¡Registro exitoso!", "Tu cuenta fue creada. Ahora inicia sesión.");
       router.replace("/login");
     } catch (err: any) {
-      console.log("❌ ERROR REGISTRO:", err?.response?.data || err.message);
-      const statusCode = err?.response?.status;
-      if (statusCode === 404) {
-        Alert.alert(
-          "Backend incompleto",
-          "Tu backend no expone POST /auth/register. Debes implementar esa ruta para guardar usuarios en base de datos."
-        );
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.error || err?.message;
+      if (status === 413) {
+        Alert.alert("Fotos muy pesadas", "Las imágenes son demasiado grandes. Intenta con fotos de menor resolución.");
       } else {
-        Alert.alert("Error", err?.response?.data?.error || "No se pudo registrar el usuario");
+        Alert.alert("Error", msg || "No se pudo registrar el usuario");
       }
     } finally {
       setLoading(false);
     }
   };
 
+  const neighborhoods = NEIGHBORHOODS[city] || [];
+
+  const PhotoBox = ({
+    uri, label, onPress,
+  }: { uri: string | null; label: string; onPress: () => void }) => (
+    <TouchableOpacity onPress={onPress} style={[styles.photoBox, { borderColor: accent }]}>
+      {uri
+        ? <Image source={{ uri }} style={styles.photoImg} />
+        : <Text style={{ color: "#888", textAlign: "center", fontSize: 12 }}>📷 {label}</Text>
+      }
+    </TouchableOpacity>
+  );
+
+  const DropdownField = ({
+    show, items, label, onToggle, onSelect,
+  }: { show: boolean; items: string[]; label: string; onToggle: () => void; onSelect: (v: string) => void }) => (
+    <>
+      <TouchableOpacity onPress={onToggle} style={[styles.dropBtn, { borderColor: accent }]}>
+        <Text style={{ color: "#fff", flex: 1 }}>{label}</Text>
+        <Text style={{ color: accent }}>▼</Text>
+      </TouchableOpacity>
+      {show && (
+        <View style={[styles.dropList, { borderColor: accent }]}>
+          {items.map((item) => (
+            <TouchableOpacity key={item} onPress={() => onSelect(item)} style={styles.dropItem}>
+              <Text style={{ color: "#fff" }}>{item}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </>
+  );
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Registro</Text>
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: "#0d0d0d" }]}>
       <Text style={[styles.logo, { color: accent }]}>✂️ STYLEAPP</Text>
       <Text style={styles.title}>Registro de usuario</Text>
 
-      <SectionLabel text="Tipo de usuario" />
+      {/* GÉNERO */}
+      <Label text="Género" accent={accent} />
       <View style={styles.row}>
-        <Option text="Cliente" active={role === "client"} accent={accent} onPress={() => setRole("client")} />
-        <Option text="Barbero" active={role === "barber"} accent={accent} onPress={() => setRole("barber")} />
+        <Chip text="Masculino" active={gender === "male"} accent={accent} onPress={() => setGender("male")} />
+        <Chip text="Femenino" active={gender === "female"} accent={accent} onPress={() => setGender("female")} />
       </View>
 
-      <SectionLabel text="Género" />
-      <View style={styles.row}>
-        <Option text="Masculino" active={gender === "male"} accent={accent} onPress={() => setGender("male")} />
-        <Option text="Femenino" active={gender === "female"} accent={accent} onPress={() => setGender("female")} />
-      </View>
+      {/* CIUDAD Y BARRIO */}
+      <Label text="Ciudad *" accent={accent} />
+      <DropdownField
+        show={showCity} items={CITIES} label={city}
+        onToggle={() => setShowCity(!showCity)}
+        onSelect={(v) => { setCity(v); setNeighborhood(""); setShowCity(false); }}
+      />
 
-      <SectionLabel text="Datos personales" />
-      <Input placeholder="Usuario" value={form.username} onChange={(v) => handleChange("username", v)} />
-      <Input placeholder="Contraseña" value={form.password} secure onChange={(v) => handleChange("password", v)} />
-      <Input placeholder="Primer nombre *" value={form.firstName} onChange={(v) => handleChange("firstName", v)} />
-      <Input placeholder="Segundo nombre" value={form.secondName} onChange={(v) => handleChange("secondName", v)} />
-      <Input placeholder="Primer apellido *" value={form.lastName} onChange={(v) => handleChange("lastName", v)} />
-      <Input placeholder="Segundo apellido" value={form.secondLastName} onChange={(v) => handleChange("secondLastName", v)} />
-      <Input placeholder="Tipo documento (CC)" value={form.documentType} onChange={(v) => handleChange("documentType", v)} />
-      <Input placeholder="Número documento" keyboard="numeric" value={form.documentNumber} onChange={(v) => handleChange("documentNumber", v.replace(/[^0-9]/g, ""))} />
-      <Input placeholder="Celular" keyboard="numeric" value={form.phone} onChange={(v) => handleChange("phone", v.replace(/[^0-9]/g, ""))} />
-      <Input placeholder="Email" keyboard="email-address" value={form.email} onChange={(v) => handleChange("email", v)} />
+      <Label text="Barrio *" accent={accent} />
+      <DropdownField
+        show={showNeighborhood} items={neighborhoods}
+        label={neighborhood || "Selecciona barrio"}
+        onToggle={() => setShowNeighborhood(!showNeighborhood)}
+        onSelect={(v) => { setNeighborhood(v); setShowNeighborhood(false); }}
+      />
 
-      <SectionLabel text="Dirección" />
-      <Input placeholder="Dirección principal del servicio" value={form.address} onChange={(v) => handleChange("address", v)} />
-
-      <SectionLabel text="Medio de pago" />
-      <View style={styles.columnGap}>
-        {paymentOptions.map((option) => (
-          <Option
-            key={option.id}
-            text={option.label}
-            active={form.paymentMethod === option.id}
-            accent={accent}
-            onPress={() => handleChange("paymentMethod", option.id)}
-          />
+      {/* TIPO DE USUARIO */}
+      <Label text="Tipo de usuario" accent={accent} />
+      <View style={styles.col}>
+        {ROLE_OPTIONS.map((opt) => (
+          <TouchableOpacity
+            key={opt.id} onPress={() => setRole(opt.id)}
+            style={[styles.roleCard, { borderColor: accent }, role === opt.id && { backgroundColor: accent }]}
+          >
+            <Text style={[styles.roleLabel, role === opt.id && { color: "#000" }]}>{opt.label}</Text>
+            <Text style={[styles.roleSub, role === opt.id && { color: "#222" }]}>{opt.subtitle}</Text>
+          </TouchableOpacity>
         ))}
       </View>
-      <Input placeholder="Número de cuenta o Nequi" value={form.accountNumberOrNequi} onChange={(v) => handleChange("accountNumberOrNequi", v)} />
 
-      <View style={styles.row}>
-        <Option text="Ahorros" active={form.accountType === "ahorros"} accent={accent} onPress={() => handleChange("accountType", "ahorros")} />
-        <Option text="Corriente" active={form.accountType === "corriente"} accent={accent} onPress={() => handleChange("accountType", "corriente")} />
-      </View>
+      {/* FOTO DE PERFIL */}
+      <Label text="Foto de perfil *" accent={accent} />
+      <PhotoBox
+        uri={profilePhoto} label="Tomar o adjuntar foto de perfil"
+        onPress={() => showImageOptions(setProfilePhoto)}
+      />
 
-      {role === "barber" && (
+      {/* DATOS PERSONALES */}
+      <Label text="Datos personales" accent={accent} />
+      <Field label="Primer nombre *" value={firstName} onChange={(v) => setFirstName(onlyLetters(v))} accent={accent} />
+      <Field label="Segundo nombre" value={secondName} onChange={(v) => setSecondName(onlyLetters(v))} accent={accent} />
+      <Field label="Primer apellido *" value={lastName} onChange={(v) => setLastName(onlyLetters(v))} accent={accent} />
+      <Field label="Segundo apellido" value={secondLastName} onChange={(v) => setSecondLastName(onlyLetters(v))} accent={accent} />
+
+      <Label text="Tipo de documento *" accent={accent} />
+      <DropdownField
+        show={showDocType} items={DOCUMENT_TYPES} label={docType}
+        onToggle={() => setShowDocType(!showDocType)}
+        onSelect={(v) => { setDocType(v); setShowDocType(false); }}
+      />
+
+      <Field label="Número de documento *" value={docNumber} onChange={(v) => setDocNumber(v.replace(/\D/g, ""))} keyboard="numeric" accent={accent} />
+      <Field label="Celular *" value={phone} onChange={(v) => setPhone(v.replace(/\D/g, ""))} keyboard="numeric" accent={accent} />
+
+      {/* ACCESO */}
+      <Label text="Acceso a la cuenta" accent={accent} />
+      <Field label="Email *" value={email} onChange={setEmail} keyboard="email-address" accent={accent} />
+      <Field label="Nombre de usuario" value={username} onChange={setUsername} accent={accent} />
+      <Field label="Contraseña *" value={password} onChange={setPassword} secure accent={accent} />
+
+      {/* DIRECCIÓN */}
+      <Label text="Dirección *" accent={accent} />
+      <Field label="Calle, número y detalles" value={address} onChange={setAddress} accent={accent} />
+
+      {/* MEDIO DE PAGO */}
+      <Label text="Medio de pago" accent={accent} />
+      <DropdownField
+        show={showPayment}
+        items={["Nequi", "PSE", "Efectivo"]}
+        label={paymentMethod === "nequi" ? "Nequi" : paymentMethod === "pse" ? "PSE" : "Efectivo"}
+        onToggle={() => setShowPayment(!showPayment)}
+        onSelect={(v) => {
+          setPaymentMethod(v === "Nequi" ? "nequi" : v === "PSE" ? "pse" : "efectivo");
+          setShowPayment(false);
+        }}
+      />
+      <Field label="Número de cuenta / Nequi *" value={accountNumber} onChange={(v) => setAccountNumber(v.replace(/\D/g, ""))} keyboard="numeric" accent={accent} />
+
+      {/* PROFESIONALES */}
+      {isProfessional(role) && (
         <>
-          <SectionLabel text="Portafolio (mínimo 3 fotos - URLs)" />
-          <Input placeholder="Foto 1 (URL o ruta)" value={form.portfolio1} onChange={(v) => handleChange("portfolio1", v)} />
-          <Input placeholder="Foto 2 (URL o ruta)" value={form.portfolio2} onChange={(v) => handleChange("portfolio2", v)} />
-          <Input placeholder="Foto 3 (URL o ruta)" value={form.portfolio3} onChange={(v) => handleChange("portfolio3", v)} />
+          <Label text={`Portafolio (${portfolio.filter(Boolean).length}/3 fotos) *`} accent={accent} />
+          <View style={styles.row}>
+            {[0, 1, 2].map((i) => (
+              <TouchableOpacity
+                key={i}
+                onPress={() => showImageOptions((b64) => updatePortfolio(i, b64))}
+                style={[styles.portfolioBox, { borderColor: accent }]}
+              >
+                {portfolio[i]
+                  ? <Image source={{ uri: portfolio[i]! }} style={styles.portfolioImg} />
+                  : <Text style={{ color: accent, fontSize: 28, textAlign: "center" }}>+</Text>
+                }
+              </TouchableOpacity>
+            ))}
+          </View>
 
-          <SectionLabel text="Cédula de ciudadanía" />
-          <Input placeholder="Cédula frente (URL o ruta)" value={form.idFront} onChange={(v) => handleChange("idFront", v)} />
-          <Input placeholder="Cédula reverso (URL o ruta)" value={form.idBack} onChange={(v) => handleChange("idBack", v)} />
+          <Label text="Cédula - Frente *" accent={accent} />
+          <PhotoBox uri={idFront} label="Adjuntar frente de la cédula" onPress={() => showImageOptions(setIdFront)} />
+
+          <Label text="Cédula - Reverso *" accent={accent} />
+          <PhotoBox uri={idBack} label="Adjuntar reverso de la cédula" onPress={() => showImageOptions(setIdBack)} />
+
+          <Label
+            text={`Diploma o Certificado ${role === "quiropodologo" ? "* (obligatorio)" : "(opcional)"}`}
+            accent={accent}
+          />
+          <PhotoBox uri={diploma} label="Adjuntar diploma o certificado" onPress={() => showImageOptions(setDiploma)} />
         </>
       )}
 
-      <TouchableOpacity style={[styles.button, { backgroundColor: accent, opacity: loading ? 0.7 : 1 }]} onPress={handleRegister} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? "Creando..." : "Crear cuenta"}</Text>
+      <TouchableOpacity
+        style={[styles.btn, { backgroundColor: accent, opacity: loading ? 0.7 : 1 }]}
+        onPress={handleRegister} disabled={loading}
+      >
+        <Text style={styles.btnText}>{loading ? "Creando cuenta..." : "Crear cuenta"}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.replace("/login")}>
@@ -255,116 +331,57 @@ export default function RegisterScreen() {
   );
 }
 
-function SectionLabel({ text }: { text: string }) {
-  return <Text style={styles.label}>{text}</Text>;
+function Label({ text, accent }: { text: string; accent: string }) {
+  return <Text style={[styles.label, { color: accent }]}>{text}</Text>;
 }
 
-type InputProps = {
-  placeholder: string;
-  value: string;
-  onChange: (value: string) => void;
-  secure?: boolean;
-  keyboard?: "default" | "numeric" | "email-address";
-};
-
-function Input({ placeholder, value, onChange, secure = false, keyboard = "default" }: InputProps) {
-  return (
-    <TextInput
-      placeholder={placeholder}
-      placeholderTextColor="#888"
-      secureTextEntry={secure}
-      keyboardType={keyboard}
-      style={styles.input}
-      value={value}
-      onChangeText={onChange}
-    />
-  );
-}
-
-type OptionProps = {
-  text: string;
-  active: boolean;
-  accent: string;
-  onPress: () => void;
-};
-
-function Option({ text, active, accent, onPress }: OptionProps) {
+function Chip({ text, active, accent, onPress }: { text: string; active: boolean; accent: string; onPress: () => void }) {
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={[styles.option, { borderColor: accent }, active && { backgroundColor: accent }]}
+      style={[styles.chip, { borderColor: accent }, active && { backgroundColor: accent }]}
     >
-      <Text style={[styles.optionText, active && { color: "#000" }]}>{text}</Text>
+      <Text style={[{ color: "#fff", textAlign: "center", fontWeight: "700" }, active && { color: "#000" }]}>
+        {text}
+      </Text>
     </TouchableOpacity>
   );
 }
 
+function Field({ label, value, onChange, secure = false, keyboard = "default", accent }: {
+  label: string; value: string; onChange: (v: string) => void;
+  secure?: boolean; keyboard?: "default" | "numeric" | "email-address"; accent: string;
+}) {
+  return (
+    <TextInput
+      placeholder={label} placeholderTextColor="#555"
+      secureTextEntry={secure} keyboardType={keyboard}
+      style={[styles.input, { borderColor: accent + "55" }]}
+      value={value} onChangeText={onChange}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    backgroundColor: "#050505",
-    paddingBottom: 36,
-  },
-  logo: {
-    fontSize: 34,
-    textAlign: "center",
-    marginBottom: 6,
-    fontWeight: "900",
-  },
-  title: {
-    color: "#fff",
-    fontSize: 20,
-    textAlign: "center",
-    marginBottom: 18,
-    fontWeight: "700",
-  },
-  label: {
-    color: "#fff",
-    marginTop: 14,
-    marginBottom: 8,
-    fontWeight: "700",
-  },
-  row: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  columnGap: {
-    gap: 8,
-  },
-  option: {
-    flex: 1,
-    borderWidth: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: "#101010",
-  },
-  optionText: {
-    textAlign: "center",
-    color: "#fff",
-    fontWeight: "700",
-  },
-  input: {
-    backgroundColor: "#171717",
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
-    color: "#fff",
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  button: {
-    padding: 14,
-    borderRadius: 10,
-    marginTop: 24,
-  },
-  buttonText: {
-    textAlign: "center",
-    fontWeight: "900",
-    color: "#000",
-  },
-  link: {
-    textAlign: "center",
-    marginTop: 18,
-    fontWeight: "700",
-  },
+  container: { padding: 20, paddingBottom: 48 },
+  logo: { fontSize: 32, textAlign: "center", fontWeight: "900", marginBottom: 4 },
+  title: { color: "#fff", fontSize: 20, textAlign: "center", marginBottom: 16, fontWeight: "700" },
+  label: { marginTop: 14, marginBottom: 6, fontWeight: "700", fontSize: 13 },
+  row: { flexDirection: "row", gap: 8 },
+  col: { gap: 8 },
+  chip: { flex: 1, borderWidth: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: "#1a1a1a" },
+  roleCard: { borderWidth: 1, padding: 12, borderRadius: 10, backgroundColor: "#1a1a1a" },
+  roleLabel: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  roleSub: { color: "#888", fontSize: 11, marginTop: 2 },
+  input: { backgroundColor: "#141414", borderRadius: 8, padding: 13, marginBottom: 8, color: "#fff", borderWidth: 1 },
+  btn: { padding: 15, borderRadius: 10, marginTop: 24, marginBottom: 8 },
+  btnText: { textAlign: "center", fontWeight: "900", color: "#000", fontSize: 16 },
+  link: { textAlign: "center", marginTop: 12, fontWeight: "700" },
+  photoBox: { borderWidth: 1, borderStyle: "dashed", borderRadius: 10, padding: 14, alignItems: "center", justifyContent: "center", marginBottom: 8, minHeight: 90 },
+  photoImg: { width: "100%", height: 130, borderRadius: 8 },
+  portfolioBox: { flex: 1, borderWidth: 1, borderStyle: "dashed", borderRadius: 8, aspectRatio: 1, alignItems: "center", justifyContent: "center" },
+  portfolioImg: { width: "100%", height: "100%", borderRadius: 8 },
+  dropBtn: { borderWidth: 1, borderRadius: 8, padding: 13, flexDirection: "row", alignItems: "center", marginBottom: 4, backgroundColor: "#141414" },
+  dropList: { borderWidth: 1, borderRadius: 8, backgroundColor: "#1a1a1a", marginBottom: 8 },
+  dropItem: { padding: 13, borderBottomWidth: 1, borderBottomColor: "#2a2a2a" },
 });

@@ -1,13 +1,23 @@
+// context/AuthContext.tsx
 import api from "@/api";
-import { setToken as setMemoryToken } from "@/services/tokenManager";
 import * as SecureStore from "expo-secure-store";
 import { createContext, useContext, useEffect, useState } from "react";
 
-type User = {
+export type UserRole =
+  | "client"
+  | "barber"
+  | "estilista"
+  | "quiropodologo"
+  | "admin";
+
+export type User = {
   id: number;
   email: string;
-  role: "client" | "barber" | "admin";
+  role: UserRole;
   gender?: "male" | "female";
+  name?: string;
+  profile_photo?: string;
+  rating?: number;
 };
 
 type AuthContextType = {
@@ -20,105 +30,51 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
-const normalizeToken = (value: unknown) => {
-  if (!value) return "";
-  return String(value).replace(/\s+/g, "").trim();
-};
-
-const enrichUser = async (baseUser: User, token?: string | null): Promise<User> => {
-  try {
-    const res = await api.get(`/usuarios/me/${baseUser.id}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-
-    const profile = res?.data?.user ?? res?.data;
-
-    return {
-      ...baseUser,
-      gender: profile?.gender || baseUser.gender,
-    };
-  } catch {
-    return baseUser;
-  }
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔄 LOAD SESSION
   useEffect(() => {
-    async function loadSession() {
+    // Al iniciar: limpiar sesión para forzar login siempre
+    const init = async () => {
       try {
-        const storedToken = await SecureStore.getItemAsync("token");
-        const storedUser = await SecureStore.getItemAsync("user");
-
-        const cleanToken = normalizeToken(storedToken);
-
-        if (cleanToken && storedUser) {
-          setToken(cleanToken);
-          setMemoryToken(cleanToken);
-          const parsed = JSON.parse(storedUser);
-          const enriched = await enrichUser(parsed, cleanToken);
-          setUser(enriched);
-          await SecureStore.setItemAsync("user", JSON.stringify(enriched));
-        }
-      } catch (err) {
-        console.log("❌ Error cargando sesión", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadSession();
+        await SecureStore.deleteItemAsync("token");
+        await SecureStore.deleteItemAsync("user");
+      } catch {}
+      setLoading(false);
+    };
+    init();
   }, []);
 
-  // 🔐 LOGIN
   const login = async (email: string, password: string) => {
-    console.log("📨 LOGIN →", email);
     const res = await api.post("/auth/login", { email, password });
+    const { token: newToken, user: newUser } = res.data;
 
-    console.log("🧪 RESPUESTA LOGIN:", res.data);
+    const cleanToken = String(newToken).replace(/\s+/g, "").trim();
 
-    const token = normalizeToken(res.data.token);
-    const user = await enrichUser(res.data.user, token);
+    // Guardar en SecureStore para que api.ts lo lea en cada request
+    await SecureStore.setItemAsync("token", cleanToken);
+    await SecureStore.setItemAsync("user", JSON.stringify(newUser));
 
-    if (!token || !user) {
-      throw new Error("Respuesta inválida del servidor");
-    }
-
-    await SecureStore.setItemAsync("token", token);
-    await SecureStore.setItemAsync("user", JSON.stringify(user));
-
-    setToken(token);
-    setMemoryToken(token); // 🔥 CLAVE
-    setUser(user);
+    setToken(cleanToken);
+    setUser(newUser);
   };
 
-  // 🚪 LOGOUT
   const logout = async () => {
     await SecureStore.deleteItemAsync("token");
     await SecureStore.deleteItemAsync("user");
-
     setToken(null);
-    setMemoryToken(null);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        loading,
-        login,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export const useAuth = () => useContext(AuthContext);
+export function useAuth() {
+  return useContext(AuthContext);
+}

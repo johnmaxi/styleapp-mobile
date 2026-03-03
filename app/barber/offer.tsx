@@ -1,295 +1,120 @@
+// app/barber/offer.tsx
+import api from "@/api";
+import { useAuth } from "@/context/AuthContext";
+import { getPalette } from "@/utils/palette";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Alert, Text, TextInput, TouchableOpacity, View } from "react-native";
-import api from "../../api";
-import { useAuth } from "../../context/AuthContext";
 
-type Bid = {
-  id: number;
-  barber_id?: number;
-  status: "pending" | "accepted" | "rejected";
-};
-
-type RequestItem = { id: number; status?: string; assigned_barber_id?: number };
-
-export default function Offer() {
+export default function OfferScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { id, price } = useLocalSearchParams<{ id: string; price?: string }>();
-  const [counterPrice, setCounterPrice] = useState("");
+  const palette = getPalette(user?.gender);
+  const params = useLocalSearchParams<{
+    requestId?: string;
+    currentPrice?: string;
+    serviceType?: string;
+    address?: string;
+  }>();
+
+  const [rawAmount, setRawAmount] = useState("");
   const [loading, setLoading] = useState(false);
-  const [blocked, setBlocked] = useState(false);
-  const [isActive, setIsActive] = useState(true);
 
-  const lastStatusRef = useRef<string | null>(null);
-  const prevHadPendingRef = useRef(false);
+  // Formatea el número mientras escribe: 50000 → $50.000
+  const formatCOP = (val: string): string => {
+    const digits = val.replace(/\D/g, "");
+    if (!digits) return "";
+    return Number(digits).toLocaleString("es-CO");
+  };
 
-  const fetchMyBidsForRequest = useCallback(
-    async (requestId: string) => {
-      const endpoints = [
-        `/bids/barber/request/${requestId}`,
-        `/bids/me/request/${requestId}`,
-        `/bids/my/request/${requestId}`,
-        `/bids/request/${requestId}`,
-      ];
+  const handleAmountChange = (val: string) => {
+    const digits = val.replace(/\D/g, "");
+    setRawAmount(digits);
+  };
 
-      for (const endpoint of endpoints) {
-        try {
-          const res = await api.get(endpoint);
-          const bids: Bid[] = Array.isArray(res.data)
-            ? res.data
-            : Array.isArray(res.data?.data)
-              ? res.data.data
-              : [];
-
-          if (endpoint === `/bids/request/${requestId}` && user?.id) {
-            return bids.filter((bid) => Number(bid.barber_id) === Number(user.id));
-          }
-
-          return bids;
-        } catch {
-          // try next endpoint
-        }
-      }
-
-      return [];
-    },
-    [user?.id]
-  );
-
-  const getAssignedService = useCallback(async () => {
-    const endpoints = [
-      "/service-requests/assigned/me",
-      "/service-requests/active/me",
-      "/service-requests/my-active",
-      "/service-requests",
-    ];
-
-    for (const endpoint of endpoints) {
-      try {
-        const res = await api.get(endpoint);
-        const payload = res.data;
-        const list: RequestItem[] = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : payload?.data
-              ? [payload.data]
-              : [];
-
-        const assigned = list.find(
-          (item) =>
-            Number(item.id) === Number(id) &&
-            (item.status === "accepted" || item.status === "on_route")
-        );
-        if (assigned) return assigned;
-      } catch {
-        // try next
-      }
+  const handleSubmit = async () => {
+    const amount = Number(rawAmount);
+    if (!amount || amount < 1000) {
+      Alert.alert("Monto inválido", "Ingresa un valor mayor a $1.000");
+      return;
     }
 
-    return null;
-  }, [id]);
-
-  const isRequestOpen = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await api.get("/service-requests/open");
-      const payload = res.data;
-      const list: RequestItem[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : [];
-      return list.some((r) => Number(r.id) === Number(id));
-    } catch {
-      return false;
-    }
-  }, [id]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function checkBidState() {
-      if (!id) return;
-
-      try {
-        const activeFlag = await SecureStore.getItemAsync("barber_is_active");
-        setIsActive(activeFlag !== "0");
-
-        const [bids, assignedForMe, requestOpen] = await Promise.all([
-          fetchMyBidsForRequest(id),
-          getAssignedService(),
-          isRequestOpen(),
-        ]);
-
-        if (!mounted) return;
-
-        const myPending = bids.find((bid) => bid.status === "pending");
-        const myAccepted = bids.find((bid) => bid.status === "accepted");
-        const myRejected = bids.find((bid) => bid.status === "rejected");
-
-        setBlocked(Boolean(myPending));
-
-        if (myPending) {
-          prevHadPendingRef.current = true;
-          if (lastStatusRef.current !== "pending") {
-            lastStatusRef.current = "pending";
-          }
-        }
-
-        const acceptedDetected = Boolean(myAccepted) || Boolean(assignedForMe);
-        if (acceptedDetected && lastStatusRef.current !== "accepted") {
-          lastStatusRef.current = "accepted";
-          prevHadPendingRef.current = false;
-          Alert.alert(
-            "✅ Oferta aceptada",
-            "El cliente aceptó tu contraoferta. Ya tienes este servicio en activo.",
-            [
-              {
-                text: "Ir a servicio activo",
-                onPress: () =>
-                  router.replace({
-                    pathname: "/barber/active",
-                    params: {
-                      id,
-                      price: String(price || "0"),
-                      status: "accepted",
-                    },
-                  }),
-              },
-            ]
-          );
-          return;
-        }
-
-        const rejectedDetected =
-          Boolean(myRejected) || (prevHadPendingRef.current && !myPending && requestOpen);
-
-        if (rejectedDetected && lastStatusRef.current !== "rejected") {
-          lastStatusRef.current = "rejected";
-          prevHadPendingRef.current = false;
-          setBlocked(false);
-          Alert.alert(
-            "❌ Contraoferta rechazada",
-            "El cliente rechazó tu contraoferta. Ya puedes enviar una nueva propuesta."
-          );
-        }
-      } catch (err: any) {
-        console.log("❌ ERROR VALIDANDO BIDS:", err?.response?.data || err.message);
-      }
-    }
-
-    checkBidState();
-    const timer = setInterval(checkBidState, 5000);
-
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [fetchMyBidsForRequest, getAssignedService, id, isRequestOpen, price, router]);
-
-  const sendCounterOffer = async () => {
-    if (!id) {
-      Alert.alert("Error", "No se encontró la solicitud");
-      return;
-    }
-
-    if (!isActive) {
-      Alert.alert("Inactivo", "Activa tu estado para enviar contraofertas.");
-      return;
-    }
-
-    if (blocked) {
-      Alert.alert(
-        "Debes esperar",
-        "Ya existe una contraoferta pendiente. Espera la respuesta del cliente."
-      );
-      return;
-    }
-
-    if (!counterPrice) {
-      Alert.alert("Error", "Ingresa un valor para contraofertar");
-      return;
-    }
-
-    try {
-      setLoading(true);
       await api.post("/bids", {
-        service_request_id: Number(id),
-        amount: Number(counterPrice),
+        service_request_id: Number(params.requestId),
+        amount,
       });
-
-      lastStatusRef.current = "pending";
-      prevHadPendingRef.current = true;
-      setBlocked(true);
-
-      Alert.alert(
-        "Contraoferta enviada",
-        "El cliente podrá aceptarla o rechazarla. Te notificaremos en esta pantalla."
-      );
+      Alert.alert("Contraoferta enviada", `Tu oferta de $${amount.toLocaleString("es-CO")} fue enviada al cliente.`);
+      router.replace("/barber/jobs");
     } catch (err: any) {
-      console.log("❌ ERROR CONTRAOFERTA:", err?.response?.data || err.message);
-      Alert.alert(
-        "Error",
-        err?.response?.data?.error || "No se pudo enviar la contraoferta"
-      );
+      Alert.alert("Error", err?.response?.data?.error || "No se pudo enviar la contraoferta");
     } finally {
       setLoading(false);
     }
   };
 
+  const currentPrice = Number(params.currentPrice || 0);
+
   return (
-    <View style={{ padding: 20, gap: 10 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Nueva contraoferta</Text>
-      <Text>Solicitud: #{id}</Text>
-      <Text>Precio del cliente: ${price || "No definido"}</Text>
+    <View style={{ flex: 1, backgroundColor: palette.background, padding: 28, justifyContent: "center" }}>
+      <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text, marginBottom: 20 }}>
+        Enviar contraoferta
+      </Text>
 
-      {!isActive && (
-        <View style={{ backgroundColor: "#3a1010", padding: 10, borderRadius: 8 }}>
-          <Text style={{ color: "#ff9b9b" }}>
-            Estás inactivo. No puedes contraofertar solicitudes.
-          </Text>
-        </View>
+      <View style={{ backgroundColor: palette.card, padding: 14, borderRadius: 10, marginBottom: 20 }}>
+        <Text style={{ color: "#aaa", fontSize: 13 }}>Servicio</Text>
+        <Text style={{ color: palette.text, fontWeight: "700" }}>{params.serviceType || "No definido"}</Text>
+        <Text style={{ color: "#aaa", fontSize: 13, marginTop: 8 }}>Dirección</Text>
+        <Text style={{ color: palette.text }}>{params.address || "No definida"}</Text>
+        <Text style={{ color: "#aaa", fontSize: 13, marginTop: 8 }}>Precio del cliente</Text>
+        <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 18 }}>
+          ${currentPrice.toLocaleString("es-CO")}
+        </Text>
+      </View>
+
+      <Text style={{ color: palette.text, fontWeight: "700", marginBottom: 8 }}>
+        Tu oferta (en pesos colombianos)
+      </Text>
+
+      <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: palette.primary, borderRadius: 10, paddingHorizontal: 14, marginBottom: 8 }}>
+        <Text style={{ color: palette.primary, fontSize: 20, fontWeight: "700", marginRight: 6 }}>$</Text>
+        <TextInput
+          placeholder="Ej: 50.000"
+          placeholderTextColor="#555"
+          keyboardType="numeric"
+          value={formatCOP(rawAmount)}
+          onChangeText={handleAmountChange}
+          style={{ flex: 1, color: "#fff", fontSize: 22, fontWeight: "700", paddingVertical: 14 }}
+        />
+        <Text style={{ color: "#aaa", fontSize: 12 }}>COP</Text>
+      </View>
+
+      {rawAmount ? (
+        <Text style={{ color: palette.primary, marginBottom: 20, textAlign: "center" }}>
+          Oferta: ${Number(rawAmount).toLocaleString("es-CO")} pesos colombianos
+        </Text>
+      ) : (
+        <Text style={{ color: "#555", marginBottom: 20, textAlign: "center", fontSize: 12 }}>
+          Ingresa el valor en pesos
+        </Text>
       )}
-
-      {blocked && (
-        <View style={{ backgroundColor: "#fff6e5", padding: 10, borderRadius: 8 }}>
-          <Text style={{ color: "#8a5a00" }}>
-            Ya hay una contraoferta pendiente. Debes esperar respuesta del cliente.
-          </Text>
-        </View>
-      )}
-
-      <TextInput
-        keyboardType="numeric"
-        placeholder="Tu nuevo precio"
-        value={counterPrice}
-        onChangeText={setCounterPrice}
-        editable={!blocked && isActive}
-        style={{ borderWidth: 1, borderColor: "#ccc", padding: 10, borderRadius: 8 }}
-      />
 
       <TouchableOpacity
-        onPress={sendCounterOffer}
-        disabled={loading || blocked || !isActive}
-        style={{
-          backgroundColor: "#111",
-          padding: 14,
-          borderRadius: 8,
-          opacity: loading || blocked || !isActive ? 0.6 : 1,
-        }}
+        onPress={handleSubmit}
+        disabled={loading}
+        style={{ backgroundColor: palette.primary, padding: 16, borderRadius: 10, opacity: loading ? 0.7 : 1, marginBottom: 12 }}
       >
-        <Text style={{ color: "white", textAlign: "center" }}>
+        <Text style={{ color: "#000", textAlign: "center", fontWeight: "900", fontSize: 16 }}>
           {loading ? "Enviando..." : "Enviar contraoferta"}
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        onPress={() => router.replace("/barber/jobs")}
-        style={{ borderWidth: 1, borderColor: "#999", padding: 12, borderRadius: 8 }}
+        onPress={() => router.back()}
+        style={{ borderWidth: 1, borderColor: "#555", padding: 14, borderRadius: 10, alignItems: "center" }}
       >
-        <Text style={{ textAlign: "center" }}>Cancelar y volver</Text>
+        <Text style={{ color: "#aaa" }}>Cancelar</Text>
       </TouchableOpacity>
     </View>
   );

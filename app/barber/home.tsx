@@ -1,173 +1,138 @@
+// app/barber/home.tsx
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
-import { clearSession } from "@/store/authStore";
 import { getPalette } from "@/utils/palette";
-import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
-import { useEffect, useState } from "react";
-import { Alert, Text, TouchableOpacity, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
+import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 
-type ActiveRequest = {
+type MyBid = {
   id: number;
+  service_request_id: number;
+  amount: number;
+  status: "pending" | "accepted" | "rejected";
   service_type?: string;
   address?: string;
-  price?: number;
-  latitude?: number;
-  longitude?: number;
-  status?: string;
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  barber: "Barbero",
+  estilista: "Estilista",
+  quiropodologo: "Quiropodologo",
 };
 
 export default function BarberHome() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
-  const [isActive, setIsActive] = useState(true);
-  const [activeRequest, setActiveRequest] = useState<ActiveRequest | null>(null);
+  const [myBids, setMyBids] = useState<MyBid[]>([]);
 
-  useEffect(() => {
-    SecureStore.getItemAsync("barber_is_active").then((value) => {
-      if (value === "0") setIsActive(false);
-    });
+  const displayName = user?.name?.split(" ")[0] || "Profesional";
+  const roleLabel = ROLE_LABELS[user?.role || ""] || "Profesional";
+
+  const loadMyBids = useCallback(async () => {
+    try {
+      const res = await api.get("/bids/my-bids");
+      const bids: MyBid[] = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.data)
+        ? res.data.data
+        : [];
+      // Solo mostrar bids pendientes o aceptadas — rechazadas y completadas no aparecen en inicio
+      setMyBids(bids.filter((b) => b.status === "pending" || b.status === "accepted"));
+    } catch {}
   }, []);
 
-  const findAssignedService = async () => {
-    const endpoints = [
-      "/service-requests/assigned/me",
-      "/service-requests/active/me",
-      "/service-requests/my-active",
-      "/service-requests",
-    ];
+  useFocusEffect(
+    useCallback(() => {
+      loadMyBids();
+      const timer = setInterval(loadMyBids, 8000);
+      return () => clearInterval(timer);
+    }, [loadMyBids])
+  );
 
-    for (const endpoint of endpoints) {
-      try {
-        const res = await api.get(endpoint);
-        const payload = res.data;
-        const list = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : payload?.data
-              ? [payload.data]
-              : [];
-
-        const assigned = (list as ActiveRequest[]).find(
-          (item) => item.status === "accepted" || item.status === "on_route"
-        );
-
-        if (assigned) {
-          setActiveRequest(assigned);
-          return assigned;
-        }
-      } catch {
-        // try next endpoint
-      }
-    }
-
-    setActiveRequest(null);
-    return null;
-  };
-
-  useEffect(() => {
-    findAssignedService();
-    const timer = setInterval(findAssignedService, 5000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const toggleActive = async () => {
-    const next = !isActive;
-    setIsActive(next);
-    await SecureStore.setItemAsync("barber_is_active", next ? "1" : "0");
-  };
-
-  const logout = async () => {
-    await clearSession();
-    router.replace("/login");
-  };
+  // Solo mostrar UN servicio activo (aceptado)
+  const acceptedBid = myBids.find((b) => b.status === "accepted");
+  // Ofertas pendientes (sin la aceptada)
+  const pendingBids = myBids.filter((b) => b.status === "pending");
 
   return (
-    <View style={{ padding: 30, gap: 12, flex: 1, backgroundColor: palette.background }}>
-      <Text style={{ fontSize: 24, fontWeight: "700", color: palette.text }}>Inicio Barbero</Text>
-      <Text style={{ color: palette.text }}>Gestiona ofertas, contraofertas y servicios activos.</Text>
+    <ScrollView contentContainerStyle={{ padding: 24, backgroundColor: palette.background, paddingBottom: 40, gap: 12 }}>
+      <Text style={{ fontSize: 24, fontWeight: "900", color: palette.primary }}>
+        STYLEAPP
+      </Text>
+      <Text style={{ fontSize: 20, color: palette.text, marginBottom: 4 }}>
+        Bienvenido(a), {displayName}
+      </Text>
+      <Text style={{ color: "#aaa", marginBottom: 8 }}>Rol: {roleLabel}</Text>
 
-      <TouchableOpacity
-        onPress={toggleActive}
-        style={{
-          backgroundColor: isActive ? "#0A7E07" : "#7a1c1c",
-          padding: 14,
-          borderRadius: 8,
-        }}
-      >
-        <Text style={{ color: "#fff", textAlign: "center", fontWeight: "700" }}>
-          {isActive ? "Activo para recibir solicitudes" : "Inactivo para recibir solicitudes"}
-        </Text>
-      </TouchableOpacity>
+      {/* SERVICIO ACTIVO - solo si hay uno aceptado Y no completado */}
+      {acceptedBid && (
+        <TouchableOpacity
+          onPress={() => router.push({
+            pathname: "/barber/active",
+            params: {
+              id: String(acceptedBid.service_request_id),
+              service_type: acceptedBid.service_type || "",
+              address: acceptedBid.address || "",
+              price: String(acceptedBid.amount),
+            },
+          })}
+          style={{ backgroundColor: "#0a2a0a", padding: 16, borderRadius: 12, borderWidth: 2, borderColor: "#0A7E07" }}
+        >
+          <Text style={{ color: "#4caf50", fontWeight: "900", fontSize: 16 }}>
+            Tienes un servicio activo
+          </Text>
+          <Text style={{ color: "#aaa", marginTop: 4 }}>
+            {acceptedBid.service_type} - ${acceptedBid.amount.toLocaleString("es-CO")}
+          </Text>
+          <Text style={{ color: "#4caf50", marginTop: 6, fontWeight: "700" }}>
+            Toca para ir al servicio
+          </Text>
+        </TouchableOpacity>
+      )}
 
-      <TouchableOpacity
-        onPress={() => router.push("/barber/jobs")}
-        style={{ backgroundColor: palette.card, padding: 14, borderRadius: 8, borderWidth: 1, borderColor: palette.primary }}
-      >
-        <Text style={{ color: palette.text, textAlign: "center" }}>Ver ofertas disponibles</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        onPress={() => router.push("/barber/active")}
-        style={{ borderWidth: 1, borderColor: palette.primary, padding: 14, borderRadius: 8 }}
-      >
-        <Text style={{ textAlign: "center", color: palette.text }}>Ir a servicio activo</Text>
-      </TouchableOpacity>
-
-      {activeRequest && (
-        <View style={{ borderWidth: 1, borderColor: "#0A7E07", borderRadius: 8, padding: 12 }}>
-          <Text style={{ color: palette.text, fontWeight: "700" }}>🔔 Oferta aceptada</Text>
-          <Text style={{ color: palette.text }}>Tienes un servicio activo asignado.</Text>
-          <Text style={{ color: palette.text }}>Solicitud #{activeRequest.id}</Text>
-          <TouchableOpacity
-            onPress={() =>
-              router.push({
-                pathname: "/barber/active",
-                params: {
-                  id: String(activeRequest.id),
-                  service_type: activeRequest.service_type || "",
-                  address: activeRequest.address || "",
-                  price: String(activeRequest.price ?? 0),
-                  latitude: String(activeRequest.latitude ?? 0),
-                  longitude: String(activeRequest.longitude ?? 0),
-                  status: activeRequest.status || "accepted",
-                },
-              })
-            }
-            style={{ marginTop: 10, backgroundColor: "#0A7E07", padding: 10, borderRadius: 6 }}
-          >
-            <Text style={{ color: "#fff", textAlign: "center" }}>Abrir servicio asignado</Text>
-          </TouchableOpacity>
+      {/* OFERTAS PENDIENTES - solo las que esperan respuesta */}
+      {pendingBids.length > 0 && (
+        <View style={{ backgroundColor: "#1a1a0a", padding: 14, borderRadius: 12, borderWidth: 1, borderColor: palette.primary }}>
+          <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 8 }}>
+            Ofertas enviadas ({pendingBids.length})
+          </Text>
+          {pendingBids.map((bid) => (
+            <Text key={bid.id} style={{ color: "#ccc", marginBottom: 4 }}>
+              {bid.service_type} - ${bid.amount.toLocaleString("es-CO")} - esperando respuesta
+            </Text>
+          ))}
         </View>
       )}
 
       <TouchableOpacity
-        onPress={async () => {
-          const found = await findAssignedService();
-          if (!found) {
-            Alert.alert("Sin asignación", "Aún no tienes un servicio activo asignado.");
-          }
-        }}
-        style={{ borderWidth: 1, borderColor: palette.primary, padding: 14, borderRadius: 8 }}
+        onPress={() => router.push("/barber/jobs")}
+        style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10, borderWidth: 1, borderColor: palette.primary, alignItems: "center" }}
       >
-        <Text style={{ textAlign: "center", color: palette.text }}>Revisar notificaciones de oferta aceptada</Text>
+        <Text style={{ color: palette.text, fontWeight: "700" }}>Ver solicitudes disponibles</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => router.push("/barber/bids")}
+        style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10, borderWidth: 1, borderColor: palette.primary, alignItems: "center" }}
+      >
+        <Text style={{ color: palette.text, fontWeight: "700" }}>Mis ofertas</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         onPress={() => router.push("/profile")}
-        style={{ borderWidth: 1, borderColor: palette.primary, padding: 14, borderRadius: 8 }}
+        style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10, borderWidth: 1, borderColor: palette.primary, alignItems: "center" }}
       >
-        <Text style={{ textAlign: "center", color: palette.text }}>Mi perfil (saldo y resumen)</Text>
+        <Text style={{ color: palette.text, fontWeight: "700" }}>Mi perfil</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        onPress={logout}
-        style={{ borderWidth: 1, borderColor: "#dd0000", padding: 14, borderRadius: 8 }}
+        onPress={async () => { await logout(); router.replace("/login"); }}
+        style={{ borderWidth: 1, borderColor: "#dd0000", padding: 14, borderRadius: 10, alignItems: "center", marginTop: 8 }}
       >
-        <Text style={{ color: "#dd0000", textAlign: "center" }}>Cerrar sesión</Text>
+        <Text style={{ color: "#dd0000", fontWeight: "700" }}>Cerrar sesion</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }

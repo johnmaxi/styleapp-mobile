@@ -7,29 +7,32 @@
     "icon": "./assets/icon.png",
     "scheme": "styleapp",
     "userInterfaceStyle": "automatic",
-
     "ios": {
       "supportsTablet": true
     },
-
     "android": {
+      "package": "com.johnarelop.styleapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#000000"
       }
     },
-
     "web": {
       "favicon": "./assets/icon.png"
     },
-
     "plugins": [
       "expo-router",
       "expo-secure-store"
     ],
-
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "99cdabc5-3862-4d8f-9c77-406e7f34906e"
+      }
+    },
+    "owner": "johnarelop"
   }
 }

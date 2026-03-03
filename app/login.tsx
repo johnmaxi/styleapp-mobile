@@ -1,10 +1,11 @@
+// app/login.tsx
 import { useAuth } from "@/context/AuthContext";
-import { getSession } from "@/store/authStore";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
-  Image,
+  KeyboardAvoidingView,
+  Platform,
   Text,
   TextInput,
   TouchableOpacity,
@@ -14,122 +15,122 @@ import {
 export default function Login() {
   const router = useRouter();
   const { login } = useAuth();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      Alert.alert("Campos requeridos", "Ingresa email y contraseña");
+      return;
+    }
+    setLoading(true);
     try {
-      setLoading(true);
-      await login(email, password);
-      const session = await getSession();
-
-      if (session?.user.role === "barber") {
-        router.replace("/barber/home");
-      } else if (session?.user.role === "client") {
-        router.replace("/client/home");
-      } else if (session?.user.role === "admin") {
-        router.replace("/admin");
-      } else {
-        router.replace("/");
-      }
+      await login(email.trim(), password.trim());
+      // RedirectGuard en _layout maneja la navegación según el rol
     } catch (err: any) {
-      console.log("❌ ERROR LOGIN:", err?.response?.data || err.message);
-      Alert.alert("Error", "Credenciales inválidas");
+      const msg =
+        err?.response?.data?.error ||
+        err?.message ||
+        "Error al iniciar sesión";
+      Alert.alert("Error", msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={{ padding: 24, flex: 1, justifyContent: "center", backgroundColor: "#050505" }}>
-      <View style={{ alignItems: "center", marginBottom: 24 }}>
-        <Image
-          source={require("../assets/logo.png")}
-          style={{ width: 120, height: 120, marginBottom: 12 }}
-          resizeMode="contain"
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: "#000" }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <View style={{ flex: 1, justifyContent: "center", padding: 28 }}>
+        <Text
+          style={{
+            fontSize: 36,
+            fontWeight: "900",
+            color: "#D4AF37",
+            textAlign: "center",
+            marginBottom: 4,
+          }}
+        >
+          ✂️ STYLEAPP
+        </Text>
+        <Text
+          style={{ color: "#aaa", textAlign: "center", marginBottom: 36 }}
+        >
+          Servicios de belleza a domicilio
+        </Text>
+
+        <TextInput
+          placeholder="Email"
+          placeholderTextColor="#666"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          value={email}
+          onChangeText={setEmail}
+          style={inputStyle}
         />
-        <Text style={{ fontSize: 28, fontWeight: "900", color: "#D4AF37" }}>STYLEAPP</Text>
-        <Text style={{ color: "#fff", marginTop: 4 }}>Belleza a domicilio con estilo</Text>
+
+        <TextInput
+          placeholder="Contraseña"
+          placeholderTextColor="#666"
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+          style={inputStyle}
+        />
+
+        <TouchableOpacity
+          onPress={handleLogin}
+          disabled={loading}
+          style={{
+            backgroundColor: "#D4AF37",
+            padding: 16,
+            borderRadius: 10,
+            marginTop: 8,
+            opacity: loading ? 0.7 : 1,
+          }}
+        >
+          <Text
+            style={{
+              color: "#000",
+              textAlign: "center",
+              fontWeight: "900",
+              fontSize: 16,
+            }}
+          >
+            {loading ? "Ingresando..." : "Iniciar sesión"}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Ruta correcta: (auth)/register */}
+        <TouchableOpacity
+          onPress={() => router.push("/(auth)/register")}
+          style={{ marginTop: 20 }}
+        >
+          <Text
+            style={{
+              color: "#D4AF37",
+              textAlign: "center",
+              fontWeight: "700",
+            }}
+          >
+            ¿No tienes cuenta? Regístrate
+          </Text>
+        </TouchableOpacity>
       </View>
-
-      <TextInput
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        placeholderTextColor="#8a8a8a"
-        style={{
-          borderWidth: 1,
-          borderColor: "#D4AF37",
-          marginBottom: 10,
-          padding: 12,
-          borderRadius: 10,
-          color: "#fff",
-          backgroundColor: "#0f0f0f",
-        }}
-      />
-
-      <TextInput
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        placeholderTextColor="#8a8a8a"
-        secureTextEntry
-        style={{
-          borderWidth: 1,
-          borderColor: "#D4AF37",
-          marginBottom: 16,
-          padding: 12,
-          borderRadius: 10,
-          color: "#fff",
-          backgroundColor: "#0f0f0f",
-        }}
-      />
-
-      <TouchableOpacity
-        onPress={handleLogin}
-        disabled={loading}
-        style={{
-          backgroundColor: "#D4AF37",
-          padding: 14,
-          alignItems: "center",
-          marginBottom: 20,
-          borderRadius: 10,
-        }}
-      >
-        <Text style={{ color: "#000", fontSize: 16, fontWeight: "800" }}>
-          {loading ? "Ingresando..." : "Ingresar"}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity onPress={() => router.push("/(auth)/register")}> 
-        <Text
-          style={{
-            color: "#D4AF37",
-            textAlign: "center",
-            fontSize: 16,
-            marginBottom: 10,
-            textDecorationLine: "underline",
-          }}
-        >
-          Registrarse
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity onPress={() => router.push("/(auth)/forgot-password")}>
-        <Text
-          style={{
-            color: "#D4AF37",
-            textAlign: "center",
-            fontSize: 16,
-            textDecorationLine: "underline",
-          }}
-        >
-          Recuperar contraseña
-        </Text>
-      </TouchableOpacity>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
+
+const inputStyle = {
+  backgroundColor: "#171717",
+  borderRadius: 8,
+  padding: 14,
+  color: "#fff" as const,
+  borderWidth: 1,
+  borderColor: "#333",
+  marginBottom: 12,
+  fontSize: 15,
+};
