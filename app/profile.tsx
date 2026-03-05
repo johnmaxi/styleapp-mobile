@@ -1,14 +1,7 @@
 // app/profile.tsx
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ActivityIndicator, Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import api from "../api";
 import { useAuth } from "../context/AuthContext";
 import { getPalette } from "../utils/palette";
@@ -21,24 +14,42 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<Request[]>([]);
   const [profileData, setProfileData] = useState<any>(null);
-
   const palette = getPalette(user?.gender);
 
   useEffect(() => {
     (async () => {
       try {
-        // Cargar perfil completo con foto
-        const profileRes = await api.get(`/usuarios/me/${user?.id}`);
-        setProfileData(profileRes?.data?.user ?? profileRes?.data);
+        // Intentar cargar perfil completo con foto desde varios endpoints
+        for (const endpoint of [
+          `/usuarios/me/${user?.id}`,
+          `/users/me`,
+          `/auth/me`,
+        ]) {
+          try {
+            const profileRes = await api.get(endpoint);
+            const data = profileRes?.data?.user ?? profileRes?.data;
+            if (data && (data.name || data.email || data.profile_photo)) {
+              setProfileData(data);
+              break;
+            }
+          } catch {}
+        }
 
-        // Cargar solicitudes
-        const res = await api.get("/service-requests/mine");
-        const data = Array.isArray(res.data)
-          ? res.data
-          : Array.isArray(res.data?.data)
-            ? res.data.data
-            : [];
-        setRequests(data);
+        // Cargar solicitudes segun rol
+        const PROFESSIONAL_ROLES = ["barber", "estilista", "quiropodologo"];
+        if (PROFESSIONAL_ROLES.includes(user?.role || "")) {
+          try {
+            const res = await api.get("/service-requests/my-history");
+            const data = Array.isArray(res.data) ? res.data : res.data?.data || [];
+            setRequests(data);
+          } catch {}
+        } else {
+          try {
+            const res = await api.get("/service-requests/mine");
+            const data = Array.isArray(res.data) ? res.data : res.data?.data || [];
+            setRequests(data);
+          } catch {}
+        }
       } catch {
         setRequests([]);
       } finally {
@@ -57,12 +68,6 @@ export default function ProfileScreen() {
     return { total: requests.length, completed, open, accepted, spent };
   }, [requests]);
 
-  const renderStars = (rating: number) => {
-    return [1, 2, 3, 4, 5].map((star) => (
-      <Text key={star} style={{ fontSize: 20, color: star <= rating ? palette.primary : "#444" }}>★</Text>
-    ));
-  };
-
   if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
@@ -72,45 +77,75 @@ export default function ProfileScreen() {
   }
 
   const rating = profileData?.rating ?? 0;
-  const profilePhoto = profileData?.profile_photo;
+  // Obtener foto de perfil: primero del backend, luego del contexto de auth
+  const profilePhoto = profileData?.profile_photo || (user as any)?.profile_photo || null;
+  const displayName = profileData?.name || user?.name || user?.email || "Usuario";
+
+  const ROLE_LABELS: Record<string, string> = {
+    client: "Cliente",
+    barber: "Barbero",
+    estilista: "Estilista",
+    quiropodologo: "Quiropodologo",
+    admin: "Administrador",
+  };
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 24, backgroundColor: palette.background, gap: 10 }}>
-      <Text style={{ fontSize: 24, fontWeight: "700", color: palette.text, marginBottom: 8 }}>Mi perfil</Text>
+    <ScrollView contentContainerStyle={{ padding: 24, backgroundColor: palette.background, gap: 12, paddingBottom: 40 }}>
+      <Text style={{ fontSize: 24, fontWeight: "700", color: palette.text, marginBottom: 4 }}>Mi perfil</Text>
 
-      {/* FOTO DE PERFIL */}
-      <View style={{ alignItems: "center", marginBottom: 12 }}>
+      {/* FOTO + NOMBRE */}
+      <View style={{ alignItems: "center", marginBottom: 8 }}>
         {profilePhoto ? (
           <Image
             source={{ uri: profilePhoto }}
-            style={{ width: 100, height: 100, borderRadius: 50, borderWidth: 2, borderColor: palette.primary }}
+            style={{ width: 110, height: 110, borderRadius: 55, borderWidth: 3, borderColor: palette.primary }}
+            defaultSource={undefined}
           />
         ) : (
-          <View style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: palette.card, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: palette.primary }}>
-            <Text style={{ fontSize: 40 }}>👤</Text>
+          <View style={{ width: 110, height: 110, borderRadius: 55, backgroundColor: palette.card, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: palette.primary }}>
+            <Text style={{ fontSize: 44, color: palette.primary }}>
+              {displayName.charAt(0).toUpperCase()}
+            </Text>
           </View>
         )}
-        <Text style={{ color: palette.text, fontWeight: "700", fontSize: 18, marginTop: 8 }}>
-          {profileData?.name || user?.email}
+        <Text style={{ color: palette.text, fontWeight: "700", fontSize: 20, marginTop: 10 }}>
+          {displayName}
         </Text>
+        <Text style={{ color: "#888", fontSize: 13, marginTop: 2 }}>
+          {ROLE_LABELS[user?.role || ""] || user?.role}
+        </Text>
+        {profileData?.phone && (
+          <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>{profileData.phone}</Text>
+        )}
       </View>
 
-      {/* CALIFICACIONES */}
+      {/* CALIFICACION */}
       <View style={{ backgroundColor: palette.card, padding: 14, borderRadius: 10, alignItems: "center" }}>
-        <Text style={{ color: palette.text, fontWeight: "700", marginBottom: 6 }}>Calificación</Text>
-        <View style={{ flexDirection: "row" }}>{renderStars(Math.round(rating))}</View>
-        <Text style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>
-          {rating > 0 ? `${rating.toFixed(1)} / 5` : "Sin calificaciones aún"}
+        <Text style={{ color: palette.text, fontWeight: "700", marginBottom: 8 }}>Calificacion</Text>
+        <View style={{ flexDirection: "row", gap: 4 }}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <View key={star} style={{
+              width: 36, height: 36, borderRadius: 18,
+              backgroundColor: star <= Math.round(rating) ? palette.primary : "#222",
+              alignItems: "center", justifyContent: "center",
+              borderWidth: 1, borderColor: star <= Math.round(rating) ? palette.primary : "#444",
+            }}>
+              <Text style={{ color: star <= Math.round(rating) ? "#000" : "#555", fontWeight: "900" }}>{star}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={{ color: "#aaa", fontSize: 13, marginTop: 8 }}>
+          {rating > 0 ? `${Number(rating).toFixed(1)} / 5` : "Sin calificaciones aun"}
         </Text>
       </View>
 
       {/* RESUMEN */}
-      <Text style={{ marginTop: 10, color: palette.text, fontWeight: "700" }}>Resumen de actividad</Text>
+      <Text style={{ color: palette.text, fontWeight: "700", marginTop: 4 }}>Resumen de actividad</Text>
       <View style={{ backgroundColor: palette.card, padding: 14, borderRadius: 10, gap: 6 }}>
-        <Text style={{ color: palette.text }}>Total solicitudes: {summary.total}</Text>
-        <Text style={{ color: palette.text }}>Abiertas: {summary.open}</Text>
-        <Text style={{ color: palette.text }}>En curso: {summary.accepted}</Text>
-        <Text style={{ color: palette.text }}>Completadas: {summary.completed}</Text>
+        <Text style={{ color: palette.text }}>Total servicios: {summary.total}</Text>
+        {user?.role === "client" && <Text style={{ color: palette.text }}>Abiertos: {summary.open}</Text>}
+        {user?.role === "client" && <Text style={{ color: palette.text }}>En curso: {summary.accepted}</Text>}
+        <Text style={{ color: palette.text }}>Completados: {summary.completed}</Text>
         <Text style={{ color: palette.primary, fontWeight: "700" }}>
           {user?.role === "client" ? "Total gastado" : "Total ganado"}: ${summary.spent.toLocaleString("es-CO")}
         </Text>
@@ -118,10 +153,10 @@ export default function ProfileScreen() {
 
       {/* RECARGAR SALDO */}
       <TouchableOpacity
-        style={{ borderWidth: 1, borderColor: palette.primary, padding: 14, borderRadius: 10, alignItems: "center", marginTop: 4 }}
-        onPress={() => alert("Función de recarga disponible próximamente")}
+        style={{ borderWidth: 1, borderColor: palette.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
+        onPress={() => router.push("/recharge" as any)}
       >
-        <Text style={{ color: palette.primary, fontWeight: "700" }}>💳 Recargar saldo</Text>
+        <Text style={{ color: palette.primary, fontWeight: "700" }}>Recargar saldo</Text>
       </TouchableOpacity>
 
       {user?.role === "client" && (
@@ -129,24 +164,24 @@ export default function ProfileScreen() {
           onPress={() => router.push("/client/create-service")}
           style={{ borderWidth: 1, borderColor: palette.primary, padding: 12, borderRadius: 10, alignItems: "center" }}
         >
-          <Text style={{ color: palette.text, textAlign: "center" }}>Crear nueva solicitud</Text>
+          <Text style={{ color: palette.text }}>Crear nueva solicitud</Text>
         </TouchableOpacity>
       )}
 
       {user?.role === "admin" && (
         <TouchableOpacity
-          onPress={() => router.push("/admin")}
+          onPress={() => router.push("/admin" as any)}
           style={{ borderWidth: 1, borderColor: palette.primary, padding: 12, borderRadius: 10, alignItems: "center" }}
         >
-          <Text style={{ color: palette.text, textAlign: "center" }}>Panel de administración</Text>
+          <Text style={{ color: palette.text }}>Panel de administracion</Text>
         </TouchableOpacity>
       )}
 
       <TouchableOpacity
         onPress={() => router.back()}
-        style={{ marginTop: 8, borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 10, alignItems: "center" }}
+        style={{ marginTop: 4, borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 10, alignItems: "center" }}
       >
-        <Text style={{ color: "#aaa", textAlign: "center" }}>Volver</Text>
+        <Text style={{ color: "#aaa" }}>Volver</Text>
       </TouchableOpacity>
     </ScrollView>
   );

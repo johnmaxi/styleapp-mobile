@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "StyleApp",
+    "name": "Style",
     "slug": "styleapp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,13 +8,20 @@
     "scheme": "styleapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.johnarelop.styleapp"
     },
     "android": {
       "package": "com.johnarelop.styleapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#000000"
+      },
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDjGBwlnaJ92B_HqKwHNSV0DdUdGZo51wE"
+        }
       }
     },
     "web": {
