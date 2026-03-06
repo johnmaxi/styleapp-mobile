@@ -4,7 +4,10 @@ import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator, Alert, ScrollView,
+  Switch, Text, TouchableOpacity, View,
+} from "react-native";
 
 type MyBid = {
   id: number;
@@ -25,8 +28,8 @@ type ActiveService = {
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  barber: "Barbero",
-  estilista: "Estilista",
+  barber:        "Barbero",
+  estilista:     "Estilista",
   quiropodologo: "Quiropodologo",
 };
 
@@ -35,39 +38,43 @@ export default function BarberHome() {
   const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
 
-  const [myBids, setMyBids] = useState<MyBid[]>([]);
+  const [myBids, setMyBids]               = useState<MyBid[]>([]);
   const [activeService, setActiveService] = useState<ActiveService | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]             = useState(true);
+  const [isActive, setIsActive]           = useState(true);
+  const [togglingActive, setTogglingActive] = useState(false);
 
   const displayName = user?.name?.split(" ")[0] || "Profesional";
-  const roleLabel = ROLE_LABELS[user?.role || ""] || "Profesional";
+  const roleLabel   = ROLE_LABELS[user?.role || ""] || "Profesional";
 
   const loadData = useCallback(async () => {
     try {
-      // 1. Cargar servicio ASIGNADO directamente desde service_requests
-      //    Esto recupera el servicio aunque el profesional haya salido de la app
+      // Estado activo/inactivo
+      try {
+        const statusRes = await api.get("/service-requests/active-status");
+        setIsActive(statusRes.data?.is_active ?? true);
+      } catch {}
+
+      // Servicio asignado activo
       try {
         const assignedRes = await api.get("/service-requests/assigned/me");
         const assigned: ActiveService[] = Array.isArray(assignedRes.data)
           ? assignedRes.data
           : Array.isArray(assignedRes.data?.data)
-          ? assignedRes.data.data
-          : [];
-        // Tomar el más reciente con status accepted o on_route
+          ? assignedRes.data.data : [];
         const active = assigned.find(
           (s) => s.status === "accepted" || s.status === "on_route"
         );
         setActiveService(active || null);
       } catch {}
 
-      // 2. Cargar mis bids para mostrar ofertas pendientes
+      // Bids pendientes
       try {
         const bidsRes = await api.get("/bids/my-bids");
         const bids: MyBid[] = Array.isArray(bidsRes.data)
           ? bidsRes.data
           : Array.isArray(bidsRes.data?.data)
-          ? bidsRes.data.data
-          : [];
+          ? bidsRes.data.data : [];
         setMyBids(bids.filter((b) => b.status === "pending"));
       } catch {}
     } finally {
@@ -84,15 +91,34 @@ export default function BarberHome() {
     }, [loadData])
   );
 
+  const handleToggleActive = async () => {
+    setTogglingActive(true);
+    try {
+      const res = await api.patch("/service-requests/toggle-active");
+      const newActive = res.data?.is_active ?? !isActive;
+      setIsActive(newActive);
+      Alert.alert(
+        newActive ? "Ahora estas activo" : "Ahora estas inactivo",
+        newActive
+          ? "Ya puedes recibir y aceptar solicitudes de servicio."
+          : "No recibiras nuevas solicitudes mientras estes inactivo."
+      );
+    } catch (err: any) {
+      Alert.alert("Error", err?.response?.data?.error || "No se pudo cambiar el estado");
+    } finally {
+      setTogglingActive(false);
+    }
+  };
+
   const goToActiveService = () => {
     if (!activeService) return;
     router.push({
       pathname: "/barber/active",
       params: {
-        id: String(activeService.id),
+        id:           String(activeService.id),
         service_type: activeService.service_type || "",
-        address: activeService.address || "",
-        price: String(activeService.price || 0),
+        address:      activeService.address || "",
+        price:        String(activeService.price || 0),
       },
     });
   };
@@ -106,31 +132,61 @@ export default function BarberHome() {
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={{
-        padding: 24,
-        backgroundColor: palette.background,
-        paddingBottom: 40,
-        gap: 12,
-      }}
-    >
-      <Text style={{ fontSize: 24, fontWeight: "900", color: palette.primary }}>
-        Style
+    <ScrollView contentContainerStyle={{
+      padding: 24, backgroundColor: palette.background,
+      paddingBottom: 40, gap: 12,
+    }}>
+      <Text style={{ fontSize: 24, fontWeight: "900", color: palette.primary }}>Style</Text>
+      <Text style={{ fontSize: 20, color: palette.text, marginBottom: 2 }}>
+        Hola, {displayName}
       </Text>
-      <Text style={{ fontSize: 20, color: palette.text, marginBottom: 4 }}>
-        Bienvenido(a), {displayName}
-      </Text>
-      <Text style={{ color: "#aaa", marginBottom: 8 }}>Rol: {roleLabel}</Text>
+      <Text style={{ color: "#888", marginBottom: 4 }}>Rol: {roleLabel}</Text>
 
-      {/* SERVICIO ACTIVO — cargado desde service_requests/assigned/me */}
+      {/* ── TOGGLE ACTIVO / INACTIVO ── */}
+      <View style={{
+        backgroundColor: isActive ? "#0a2a0a" : "#1a1a1a",
+        borderRadius: 14, borderWidth: 2,
+        borderColor: isActive ? "#4caf50" : "#555",
+        padding: 16,
+        flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+      }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {/* Dot indicador */}
+            <View style={{
+              width: 10, height: 10, borderRadius: 5,
+              backgroundColor: isActive ? "#4caf50" : "#555",
+            }} />
+            <Text style={{
+              color: isActive ? "#4caf50" : "#888",
+              fontWeight: "900", fontSize: 16,
+            }}>
+              {isActive ? "Activo" : "Inactivo"}
+            </Text>
+          </View>
+          <Text style={{ color: "#888", fontSize: 12 }}>
+            {isActive
+              ? "Recibes solicitudes y puedes ofertar"
+              : "No recibes solicitudes nuevas"}
+          </Text>
+        </View>
+        <Switch
+          value={isActive}
+          onValueChange={handleToggleActive}
+          disabled={togglingActive}
+          trackColor={{ false: "#333", true: "#1a4d1a" }}
+          thumbColor={isActive ? "#4caf50" : "#666"}
+          ios_backgroundColor="#333"
+        />
+      </View>
+
+      {/* ── SERVICIO ACTIVO ── recuperado aunque se haya salido de la app */}
       {activeService && (
         <TouchableOpacity
           onPress={goToActiveService}
           style={{
-            backgroundColor: "#0a2a0a",
-            padding: 16,
-            borderRadius: 12,
-            borderWidth: 2,
+            backgroundColor: "#0a1a2a",
+            padding: 16, borderRadius: 12, borderWidth: 2,
             borderColor: activeService.status === "on_route" ? "#2196F3" : "#0A7E07",
           }}
         >
@@ -138,9 +194,7 @@ export default function BarberHome() {
             color: activeService.status === "on_route" ? "#2196F3" : "#4caf50",
             fontWeight: "900", fontSize: 16,
           }}>
-            {activeService.status === "on_route"
-              ? "En camino al cliente"
-              : "Tienes un servicio activo"}
+            {activeService.status === "on_route" ? "En camino al cliente" : "Tienes un servicio activo"}
           </Text>
           <Text style={{ color: "#ccc", marginTop: 4 }}>
             {activeService.service_type || "Servicio"} — Solicitud #{activeService.id}
@@ -155,13 +209,13 @@ export default function BarberHome() {
               ${Number(activeService.price).toLocaleString("es-CO")} COP
             </Text>
           )}
-          <Text style={{ color: "#888", marginTop: 8, fontSize: 12 }}>
-            Toca para continuar gestionando el servicio
+          <Text style={{ color: "#4a90e2", marginTop: 8, fontSize: 12, fontWeight: "700" }}>
+            Toca para continuar gestionando →
           </Text>
         </TouchableOpacity>
       )}
 
-      {/* OFERTAS PENDIENTES */}
+      {/* ── OFERTAS PENDIENTES ── */}
       {myBids.length > 0 && (
         <View style={{
           backgroundColor: "#1a1a0a", padding: 14, borderRadius: 12,
@@ -186,30 +240,31 @@ export default function BarberHome() {
         </View>
       )}
 
-      {/* SIN ACTIVIDAD */}
+      {/* Sin actividad */}
       {!activeService && myBids.length === 0 && (
-        <View style={{
-          backgroundColor: palette.card, padding: 16, borderRadius: 10,
-          alignItems: "center",
-        }}>
+        <View style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10, alignItems: "center" }}>
           <Text style={{ color: "#888", textAlign: "center" }}>
-            No tienes servicios activos ni ofertas pendientes.
+            {isActive
+              ? "No tienes servicios activos ni ofertas pendientes."
+              : "Activa tu disponibilidad para empezar a recibir solicitudes."}
           </Text>
         </View>
       )}
 
-      {/* BOTONES DE NAVEGACION */}
-      <TouchableOpacity
-        onPress={() => router.push("/barber/jobs")}
-        style={{
-          backgroundColor: palette.card, padding: 16, borderRadius: 10,
-          borderWidth: 1, borderColor: palette.primary, alignItems: "center",
-        }}
-      >
-        <Text style={{ color: palette.text, fontWeight: "700" }}>
-          Ver solicitudes disponibles
-        </Text>
-      </TouchableOpacity>
+      {/* ── NAVEGACION ── */}
+      {isActive && (
+        <TouchableOpacity
+          onPress={() => router.push("/barber/jobs")}
+          style={{
+            backgroundColor: palette.card, padding: 16, borderRadius: 10,
+            borderWidth: 1, borderColor: palette.primary, alignItems: "center",
+          }}
+        >
+          <Text style={{ color: palette.text, fontWeight: "700" }}>
+            Ver solicitudes disponibles
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         onPress={() => router.push("/barber/history")}
@@ -218,9 +273,7 @@ export default function BarberHome() {
           borderWidth: 1, borderColor: palette.primary, alignItems: "center",
         }}
       >
-        <Text style={{ color: palette.text, fontWeight: "700" }}>
-          Historial de Solicitudes
-        </Text>
+        <Text style={{ color: palette.text, fontWeight: "700" }}>Historial de Solicitudes</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
