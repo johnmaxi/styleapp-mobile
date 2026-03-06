@@ -38,6 +38,8 @@ type ClientInfo = {
 type GPSCoords = {
   latitude: number;
   longitude: number;
+  heading?: number;
+  updated_at?: number;
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -55,24 +57,26 @@ const STATUS_INFO: Record<string, { label: string; color: string }> = {
 };
 
 export default function BarberActive() {
-  const router  = useRouter();
+  const router   = useRouter();
   const { user } = useAuth();
-  const palette = getPalette(user?.gender);
-  const params  = useLocalSearchParams<{
-    id: string; service_type?: string; address?: string; price?: string;
+  const palette  = getPalette(user?.gender);
+  const params   = useLocalSearchParams<{
+    id: string; service_type?: string; address?: string;
+    price?: string; status?: string;
   }>();
 
-  const [request, setRequest]       = useState<ServiceRequest | null>(null);
-  const [clientInfo, setClientInfo] = useState<ClientInfo | null>(null);
-  const [loading, setLoading]       = useState(false);
-  const [myCoords, setMyCoords]     = useState<GPSCoords | null>(null);
+  const [request, setRequest]           = useState<ServiceRequest | null>(null);
+  const [clientInfo, setClientInfo]     = useState<ClientInfo | null>(null);
+  const [loading, setLoading]           = useState(false);
+  const [myCoords, setMyCoords]         = useState<GPSCoords | null>(null);
   const [clientCoords, setClientCoords] = useState<GPSCoords | null>(null);
   const [trackingActive, setTrackingActive] = useState(false);
 
-  const locationSub  = useRef<Location.LocationSubscription | null>(null);
-  const mapRef       = useRef<MapView>(null);
+  const locationSub = useRef<Location.LocationSubscription | null>(null);
+  const mapRef      = useRef<MapView>(null);
+  const clientInfoRef = useRef<ClientInfo | null>(null);
 
-  // ── Cargar datos del servicio ────────────────────────────────────────────
+  // ── Cargar servicio desde el backend ─────────────────────────────────────
   const loadRequest = useCallback(async () => {
     if (!params.id) return;
     try {
@@ -82,16 +86,20 @@ export default function BarberActive() {
           const data = res.data?.data || res.data?.request || res.data;
           if (data?.id) {
             setRequest(data);
-            if (data.client_id && !clientInfo) {
+            if (data.latitude && data.longitude) {
+              setClientCoords({ latitude: data.latitude, longitude: data.longitude });
+            }
+            // Cargar info del cliente una sola vez
+            if (data.client_id && !clientInfoRef.current) {
               try {
                 const cr    = await api.get(`/usuarios/me/${data.client_id}`);
                 const cdata = cr.data?.user || cr.data;
-                if (cdata) setClientInfo({ id: cdata.id, name: cdata.name, phone: cdata.phone });
+                if (cdata?.name) {
+                  const info = { id: cdata.id, name: cdata.name, phone: cdata.phone };
+                  setClientInfo(info);
+                  clientInfoRef.current = info;
+                }
               } catch {}
-            }
-            // Coordenadas del cliente (lugar del servicio)
-            if (data.latitude && data.longitude) {
-              setClientCoords({ latitude: data.latitude, longitude: data.longitude });
             }
             break;
           }
@@ -103,13 +111,14 @@ export default function BarberActive() {
   }, [params.id]);
 
   useEffect(() => {
+    // FIX: usar el status real de params, NO forzar "accepted"
     if (params.id) {
       setRequest({
-        id: Number(params.id),
+        id:           Number(params.id),
         service_type: params.service_type,
         address:      params.address,
         price:        params.price ? Number(params.price) : undefined,
-        status:       "accepted",
+        status:       params.status || "accepted",  // <-- usa el status real
       });
     }
     loadRequest();
@@ -117,7 +126,7 @@ export default function BarberActive() {
     return () => clearInterval(timer);
   }, [loadRequest]);
 
-  // ── GPS: publicar ubicacion en Firebase ──────────────────────────────────
+  // ── GPS Tracking ──────────────────────────────────────────────────────────
   const startTracking = useCallback(async () => {
     if (trackingActive || !params.id) return;
 
@@ -130,77 +139,43 @@ export default function BarberActive() {
     setTrackingActive(true);
 
     locationSub.current = await Location.watchPositionAsync(
-      {
-        accuracy:          Location.Accuracy.High,
-        timeInterval:      5000,   // cada 5 segundos
-        distanceInterval:  10,     // o cada 10 metros
-      },
+      { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
       async (loc) => {
-        const coords = {
-          latitude:  loc.coords.latitude,
-          longitude: loc.coords.longitude,
-          heading:   loc.coords.heading || 0,
+        const coords: GPSCoords = {
+          latitude:   loc.coords.latitude,
+          longitude:  loc.coords.longitude,
+          heading:    loc.coords.heading || 0,
           updated_at: Date.now(),
         };
         setMyCoords(coords);
-
-        // Publicar en Firebase
         try {
-          await database()
-            .ref(`tracking/service_${params.id}`)
-            .set(coords);
+          await database().ref(`tracking/service_${params.id}`).set(coords);
         } catch {}
       }
     );
   }, [params.id, trackingActive]);
 
   const stopTracking = useCallback(async () => {
-    if (locationSub.current) {
-      locationSub.current.remove();
-      locationSub.current = null;
-    }
+    locationSub.current?.remove();
+    locationSub.current = null;
     setTrackingActive(false);
-
-    // Limpiar Firebase al terminar
     if (params.id) {
-      try {
-        await database().ref(`tracking/service_${params.id}`).remove();
-      } catch {}
+      try { await database().ref(`tracking/service_${params.id}`).remove(); } catch {}
     }
   }, [params.id]);
 
-  // Iniciar tracking automaticamente cuando status es on_route
+  // Auto-iniciar tracking si el status ya es on_route al entrar
   useEffect(() => {
-    if (request?.status === "on_route") {
+    if (request?.status === "on_route" && !trackingActive) {
       startTracking();
     }
-    return () => {
-      if (request?.status === "completed" || request?.status === "cancelled") {
-        stopTracking();
-      }
-    };
   }, [request?.status]);
 
-  // Limpiar al desmontar
   useEffect(() => {
-    return () => {
-      stopTracking();
-    };
+    return () => { stopTracking(); };
   }, []);
 
-  // ── Centrar mapa ─────────────────────────────────────────────────────────
-  const centerMap = () => {
-    if (!mapRef.current) return;
-    const coords = myCoords || clientCoords;
-    if (!coords) return;
-    mapRef.current.animateToRegion({
-      ...coords,
-      latitudeDelta:  0.01,
-      longitudeDelta: 0.01,
-    }, 500);
-  };
-
-  // ── Acciones ─────────────────────────────────────────────────────────────
+  // ── Acciones ──────────────────────────────────────────────────────────────
   const updateStatus = async (newStatus: string) => {
     if (!request?.id) return;
     setLoading(true);
@@ -211,7 +186,6 @@ export default function BarberActive() {
       if (newStatus === "on_route") {
         startTracking();
       }
-
       if (newStatus === "completed") {
         await stopTracking();
         router.replace({
@@ -219,7 +193,7 @@ export default function BarberActive() {
           params: {
             service_request_id: String(request.id),
             rated_id:   String(request.client_id || ""),
-            rated_name: clientInfo?.name || "el cliente",
+            rated_name: clientInfoRef.current?.name || "el cliente",
             redirect:   "/barber/home",
           },
         });
@@ -244,21 +218,17 @@ export default function BarberActive() {
 
   const statusInfo = STATUS_INFO[request?.status || "accepted"] || STATUS_INFO.accepted;
 
-  // Region del mapa — prioridad: mi ubicacion, luego la del cliente
   const mapRegion = myCoords
-    ? { ...myCoords, latitudeDelta: 0.01, longitudeDelta: 0.01 }
+    ? { ...myCoords,     latitudeDelta: 0.01,  longitudeDelta: 0.01  }
     : clientCoords
     ? { ...clientCoords, latitudeDelta: 0.015, longitudeDelta: 0.015 }
     : null;
 
   return (
-    <ScrollView
-      contentContainerStyle={{
-        backgroundColor: palette.background,
-        gap: 12,
-        paddingBottom: 40,
-      }}
-    >
+    <ScrollView contentContainerStyle={{
+      backgroundColor: palette.background, gap: 0, paddingBottom: 40,
+    }}>
+
       {/* MAPA */}
       {mapRegion ? (
         <View style={{ height: 260, position: "relative" }}>
@@ -268,17 +238,10 @@ export default function BarberActive() {
             style={{ flex: 1 }}
             initialRegion={mapRegion}
             showsUserLocation={false}
-            showsTraffic={false}
           >
-            {/* Mi ubicacion (profesional) */}
             {myCoords && (
-              <Marker
-                coordinate={myCoords}
-                title="Tu ubicacion"
-                pinColor="#2196F3"
-              />
+              <Marker coordinate={myCoords} title="Tu ubicacion" pinColor="#2196F3" />
             )}
-            {/* Ubicacion del cliente / servicio */}
             {clientCoords && (
               <Marker
                 coordinate={clientCoords}
@@ -289,9 +252,10 @@ export default function BarberActive() {
             )}
           </MapView>
 
-          {/* Boton centrar */}
           <TouchableOpacity
-            onPress={centerMap}
+            onPress={() => mapRef.current?.animateToRegion(
+              { ...(myCoords || clientCoords)!, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 500
+            )}
             style={{
               position: "absolute", bottom: 12, right: 12,
               backgroundColor: "#000000cc", borderRadius: 8,
@@ -301,7 +265,6 @@ export default function BarberActive() {
             <Text style={{ color: "#fff", fontSize: 18 }}>◎</Text>
           </TouchableOpacity>
 
-          {/* Indicador tracking */}
           <View style={{
             position: "absolute", top: 10, left: 10,
             backgroundColor: trackingActive ? "#0a2a0a" : "#1a1a1a",
@@ -320,14 +283,11 @@ export default function BarberActive() {
         </View>
       ) : (
         <View style={{
-          height: 120, backgroundColor: "#1a1a1a", alignItems: "center",
-          justifyContent: "center", gap: 8,
+          height: 100, backgroundColor: "#111", alignItems: "center",
+          justifyContent: "center",
         }}>
-          <Text style={{ color: "#888", fontSize: 13 }}>
-            Mapa disponible al iniciar el camino
-          </Text>
-          <Text style={{ color: "#555", fontSize: 11 }}>
-            Toca "Estoy en camino" para activar el GPS
+          <Text style={{ color: "#555", fontSize: 12 }}>
+            Toca "Estoy en camino" para activar el mapa GPS
           </Text>
         </View>
       )}
@@ -376,14 +336,17 @@ export default function BarberActive() {
           <TouchableOpacity
             onPress={() => router.push({
               pathname: "/chat/[serviceRequestId]",
-              params: { serviceRequestId: String(request?.id), otherUserName: clientInfo?.name || "Cliente" },
+              params: {
+                serviceRequestId: String(request?.id),
+                otherUserName:    clientInfo?.name || "Cliente",
+              },
             })}
             style={{
               flex: 1, backgroundColor: "#1a1a2e", padding: 16,
               borderRadius: 10, borderWidth: 1, borderColor: "#4a90e2", alignItems: "center",
             }}
           >
-            <Text style={{ color: "#4a90e2", fontWeight: "700", fontSize: 15 }}>Chat</Text>
+            <Text style={{ color: "#4a90e2", fontWeight: "700", fontSize: 15 }}>💬 Chat</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => {
@@ -395,11 +358,11 @@ export default function BarberActive() {
               borderRadius: 10, borderWidth: 1, borderColor: "#4caf50", alignItems: "center",
             }}
           >
-            <Text style={{ color: "#4caf50", fontWeight: "700", fontSize: 15 }}>Llamar</Text>
+            <Text style={{ color: "#4caf50", fontWeight: "700", fontSize: 15 }}>📞 Llamar</Text>
           </TouchableOpacity>
         </View>
 
-        {/* ACCIONES */}
+        {/* ACCIONES DE ESTADO */}
         {request?.status === "accepted" && (
           <TouchableOpacity
             onPress={() => updateStatus("on_route")}
@@ -422,9 +385,7 @@ export default function BarberActive() {
                   alignItems: "center", borderWidth: 1, borderColor: "#4caf50",
                 }}
               >
-                <Text style={{ color: "#4caf50", fontWeight: "700" }}>
-                  Reactivar GPS
-                </Text>
+                <Text style={{ color: "#4caf50", fontWeight: "700" }}>Reactivar GPS</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity

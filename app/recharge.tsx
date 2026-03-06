@@ -15,7 +15,6 @@ import {
 import api from "../api";
 
 const WOMPI_PUBLIC_KEY = "pub_prod_GW6xxfe09CgSSEwVnN8gu1xWx4HoliDi";
-
 const AMOUNTS = [10000, 20000, 50000, 100000, 200000];
 
 export default function RechargeScreen() {
@@ -23,8 +22,8 @@ export default function RechargeScreen() {
   const { user } = useAuth();
   const palette = getPalette(user?.gender);
 
-  const [amount, setAmount] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [amount, setAmount]           = useState("");
+  const [loading, setLoading]         = useState(false);
   const [customAmount, setCustomAmount] = useState(false);
 
   const selectedAmount = Number(amount.replace(/\D/g, "")) || 0;
@@ -41,24 +40,34 @@ export default function RechargeScreen() {
 
     setLoading(true);
     try {
-      // Backend genera la firma de integridad de forma segura
+      const amountInCents = selectedAmount * 100;
+
       const res = await api.post("/payments/wompi-link", {
-        amount_in_cents: selectedAmount * 100,
-        user_id: user?.id,
+        amount_in_cents: amountInCents,
       });
 
       const { reference, integrity_signature, redirect_url } = res.data;
 
-      const wompiUrl =
-        `https://checkout.wompi.co/p/` +
-        `?public-key=${WOMPI_PUBLIC_KEY}` +
-        `&currency=COP` +
-        `&amount-in-cents=${selectedAmount * 100}` +
-        `&reference=${reference}` +
-        `&signature:integrity=${integrity_signature}` +
-        `&redirect-url=${encodeURIComponent(redirect_url)}` +
-        `&customer-data:email=${encodeURIComponent(user?.email || "")}` +
-        `&customer-data:full-name=${encodeURIComponent(user?.name || "")}`;
+      if (!reference || !integrity_signature) {
+        Alert.alert("Error", "El servidor no devolvio los datos de pago correctamente");
+        return;
+      }
+
+      // FIX: construir URL con URLSearchParams para codificar correctamente
+      // Wompi requiere "signature:integrity" con los dos puntos literales en el nombre del param
+      const params = new URLSearchParams();
+      params.append("public-key",              WOMPI_PUBLIC_KEY);
+      params.append("currency",                "COP");
+      params.append("amount-in-cents",         String(amountInCents));
+      params.append("reference",               reference);
+      params.append("signature:integrity",     integrity_signature);
+      params.append("redirect-url",            redirect_url);
+      params.append("customer-data:email",     user?.email || "");
+      params.append("customer-data:full-name", user?.name  || "");
+
+      const wompiUrl = `https://checkout.wompi.co/p/?${params.toString()}`;
+
+      console.log("Wompi URL:", wompiUrl.substring(0, 100) + "...");
 
       const result = await WebBrowser.openBrowserAsync(wompiUrl, {
         dismissButtonStyle: "close",
@@ -73,21 +82,21 @@ export default function RechargeScreen() {
         );
       }
     } catch (err: any) {
-      Alert.alert("Error", err?.response?.data?.error || "No se pudo iniciar el pago");
+      console.log("WOMPI ERROR:", JSON.stringify(err?.response?.data));
+      Alert.alert(
+        "Error",
+        err?.response?.data?.error || err?.message || "No se pudo iniciar el pago"
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={{
-        padding: 24,
-        backgroundColor: palette.background,
-        gap: 14,
-        paddingBottom: 48,
-      }}
-    >
+    <ScrollView contentContainerStyle={{
+      padding: 24, backgroundColor: palette.background,
+      gap: 14, paddingBottom: 48,
+    }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>
         Recargar saldo
       </Text>
@@ -107,9 +116,7 @@ export default function RechargeScreen() {
             style={{
               borderWidth: 1,
               borderColor: selectedAmount === a && !customAmount ? palette.primary : "#444",
-              borderRadius: 10,
-              paddingVertical: 12,
-              paddingHorizontal: 16,
+              borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16,
               backgroundColor: selectedAmount === a && !customAmount ? palette.primary + "22" : "transparent",
             }}
           >
@@ -127,9 +134,7 @@ export default function RechargeScreen() {
           style={{
             borderWidth: 1,
             borderColor: customAmount ? palette.primary : "#444",
-            borderRadius: 10,
-            paddingVertical: 12,
-            paddingHorizontal: 16,
+            borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16,
             backgroundColor: customAmount ? palette.primary + "22" : "transparent",
           }}
         >
@@ -139,7 +144,7 @@ export default function RechargeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* INPUT MONTO PERSONALIZADO */}
+      {/* INPUT PERSONALIZADO */}
       {customAmount && (
         <View>
           <Text style={{ color: "#aaa", marginBottom: 6, fontSize: 12 }}>
@@ -147,8 +152,8 @@ export default function RechargeScreen() {
           </Text>
           <View style={{
             flexDirection: "row", alignItems: "center",
-            borderWidth: 1, borderColor: palette.primary, borderRadius: 8,
-            paddingHorizontal: 12,
+            borderWidth: 1, borderColor: palette.primary,
+            borderRadius: 8, paddingHorizontal: 12,
           }}>
             <Text style={{ color: palette.primary, fontWeight: "700", marginRight: 4 }}>$</Text>
             <TextInput
@@ -178,7 +183,7 @@ export default function RechargeScreen() {
             </Text>
           </Text>
           <Text style={{ color: "#888", fontSize: 11, marginTop: 8 }}>
-            Metodos: Tarjeta debito/credito, PSE, Nequi, Bancolombia
+            Metodos: Tarjeta, PSE, Nequi, Bancolombia
           </Text>
         </View>
       )}

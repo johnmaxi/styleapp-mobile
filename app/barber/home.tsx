@@ -119,6 +119,7 @@ export default function BarberHome() {
         service_type: activeService.service_type || "",
         address:      activeService.address || "",
         price:        String(activeService.price || 0),
+        status:       activeService.status || "accepted",  // FIX: pasar status real
       },
     });
   };
