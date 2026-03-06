@@ -18,6 +18,10 @@ export type User = {
   name?: string;
   profile_photo?: string;
   rating?: number;
+  phone?: string;
+  address?: string;       // dirección registrada
+  city?: string;
+  neighborhood?: string;
 };
 
 type AuthContextType = {
@@ -31,12 +35,11 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser]   = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Al iniciar: limpiar sesión para forzar login siempre
     const init = async () => {
       try {
         await SecureStore.deleteItemAsync("token");
@@ -53,7 +56,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const cleanToken = String(newToken).replace(/\s+/g, "").trim();
 
-    // Guardar en SecureStore para que api.ts lo lea en cada request
     await SecureStore.setItemAsync("token", cleanToken);
     await SecureStore.setItemAsync("user", JSON.stringify(newUser));
 
