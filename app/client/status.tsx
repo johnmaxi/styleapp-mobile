@@ -1,6 +1,7 @@
 // app/client/status.tsx
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
+import { getRouteCoords, LatLng } from "@/utils/directions";
 import { getPalette } from "@/utils/palette";
 import database from "@react-native-firebase/database";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -9,7 +10,7 @@ import {
   ActivityIndicator, Alert, Linking,
   ScrollView, Text, TouchableOpacity, View,
 } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 
 type ServiceRequest = {
   id: number;
@@ -41,12 +42,12 @@ type TrackingData = {
 };
 
 const STATUS_INFO: Record<string, { text: string; color: string; emoji: string }> = {
-  open:      { text: "Buscando profesional...",   color: "#D4AF37", emoji: "🔍" },
-  accepted:  { text: "Profesional asignado",       color: "#4caf50", emoji: "✅" },
-  on_route:  { text: "Profesional en camino",      color: "#2196F3", emoji: "🚗" },
-  arrived:   { text: "Profesional llegó",          color: "#9C27B0", emoji: "📍" },
-  completed: { text: "Servicio completado",         color: "#4caf50", emoji: "🎉" },
-  cancelled: { text: "Servicio cancelado",          color: "#dd0000", emoji: "❌" },
+  open:      { text: "Buscando profesional...",  color: "#D4AF37", emoji: "🔍" },
+  accepted:  { text: "Profesional asignado",      color: "#4caf50", emoji: "✅" },
+  on_route:  { text: "Profesional en camino",     color: "#2196F3", emoji: "🚗" },
+  arrived:   { text: "Profesional llegó",         color: "#9C27B0", emoji: "📍" },
+  completed: { text: "Servicio completado",        color: "#4caf50", emoji: "🎉" },
+  cancelled: { text: "Servicio cancelado",         color: "#dd0000", emoji: "❌" },
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -67,12 +68,43 @@ export default function ClientStatus() {
   const [bids, setBids]               = useState<Bid[]>([]);
   const [actingBidId, setActingBidId] = useState<number | null>(null);
   const [professionalCoords, setProfessionalCoords] = useState<TrackingData | null>(null);
+  const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
+  const [loadingRoute, setLoadingRoute] = useState(false);
 
   const completedAlertShown = useRef(false);
   const arrivedAlertShown   = useRef(false);
   const mapRef = useRef<MapView>(null);
 
-  // ── Firebase: escuchar ubicacion del profesional en tiempo real ──────────
+  // Throttle ruta igual que en barber
+  const lastRouteCalc = useRef<number>(0);
+  const lastRoutePos  = useRef<LatLng | null>(null);
+
+  // ── Calcular ruta cuando el profesional se mueve ──────────────────────────
+  const updateRoute = useCallback(async (from: LatLng, to: LatLng) => {
+    const now     = Date.now();
+    const lastPos = lastRoutePos.current;
+
+    let movedEnough = true;
+    if (lastPos) {
+      const dlat = (from.latitude - lastPos.latitude) * 111000;
+      const dlng = (from.longitude - lastPos.longitude) * 111000 * Math.cos(from.latitude * Math.PI / 180);
+      movedEnough = Math.sqrt(dlat * dlat + dlng * dlng) > 50;
+    }
+
+    if (!lastPos || movedEnough || (now - lastRouteCalc.current) > 30000) {
+      setLoadingRoute(true);
+      lastRouteCalc.current = now;
+      lastRoutePos.current  = from;
+      try {
+        const coords = await getRouteCoords(from, to);
+        setRouteCoords(coords);
+      } finally {
+        setLoadingRoute(false);
+      }
+    }
+  }, []);
+
+  // ── Firebase: escuchar ubicacion del profesional ──────────────────────────
   useEffect(() => {
     if (!params.id) return;
     const ref = database().ref(`tracking/service_${params.id}`);
@@ -81,12 +113,11 @@ export default function ClientStatus() {
       const data = snap.val();
       if (data?.latitude && data?.longitude) {
         setProfessionalCoords(data as TrackingData);
-        // Centrar mapa suavemente
         mapRef.current?.animateToRegion({
           latitude:      data.latitude,
           longitude:     data.longitude,
-          latitudeDelta:  0.01,
-          longitudeDelta: 0.01,
+          latitudeDelta:  0.012,
+          longitudeDelta: 0.012,
         }, 600);
       }
     });
@@ -94,7 +125,26 @@ export default function ClientStatus() {
     return () => ref.off("value", onValue);
   }, [params.id]);
 
-  // ── Helpers de carga ──────────────────────────────────────────────────────
+  // Actualizar ruta cuando el profesional se mueve y hay destino
+  useEffect(() => {
+    if (
+      professionalCoords &&
+      request?.latitude &&
+      request?.longitude &&
+      request.status === "on_route"
+    ) {
+      updateRoute(
+        { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
+        { latitude: request.latitude, longitude: request.longitude }
+      );
+    }
+    // Limpiar ruta si llegó
+    if (request?.status === "arrived" || request?.status === "completed") {
+      setRouteCoords([]);
+    }
+  }, [professionalCoords, request?.latitude, request?.longitude, request?.status]);
+
+  // ── Carga del servicio ────────────────────────────────────────────────────
   const getRequestById = async (id: number): Promise<ServiceRequest | null> => {
     for (const path of [`/service-requests/${id}`, `/service-request/${id}`]) {
       try {
@@ -126,7 +176,6 @@ export default function ClientStatus() {
     } catch { return []; }
   };
 
-  // ── Carga principal con polling ───────────────────────────────────────────
   const loadStatus = useCallback(async () => {
     try {
       let current: ServiceRequest | null = null;
@@ -137,7 +186,7 @@ export default function ClientStatus() {
             id:        Number(params.id),
             service_type: params.service_type,
             address:   params.address,
-            price:     params.price  ? Number(params.price)  : undefined,
+            price:     params.price     ? Number(params.price)     : undefined,
             latitude:  params.latitude  ? Number(params.latitude)  : undefined,
             longitude: params.longitude ? Number(params.longitude) : undefined,
             status:    (params.status as ServiceRequest["status"]) || "open",
@@ -148,14 +197,9 @@ export default function ClientStatus() {
       if (current) setBids(await getBids(current.id));
       setRequest(current);
 
-      // Alertas de cambio de estado
       if (current?.status === "arrived" && !arrivedAlertShown.current) {
         arrivedAlertShown.current = true;
-        Alert.alert(
-          "📍 El profesional llegó",
-          "Tu profesional llegó a la dirección del servicio.",
-          [{ text: "OK" }]
-        );
+        Alert.alert("📍 El profesional llegó", "Tu profesional llegó a la dirección del servicio.");
       }
 
       if (current?.status === "completed" && !completedAlertShown.current) {
@@ -163,10 +207,10 @@ export default function ClientStatus() {
         setTimeout(() => {
           Alert.alert(
             "Servicio completado",
-            "El profesional indicó que el servicio fue completado. ¿Lo confirmas?",
+            "¿Confirmas que el servicio fue completado?",
             [
               { text: "No, hay un problema", style: "destructive",
-                onPress: () => Alert.alert("Problema reportado", "Contactanos para resolver.") },
+                onPress: () => Alert.alert("Reportado", "Contactanos para resolver.") },
               { text: "Sí, calificar",
                 onPress: () => router.replace({
                   pathname: "/rating",
@@ -220,23 +264,20 @@ export default function ClientStatus() {
 
   const cancelService = async () => {
     if (!request?.id) return;
-    Alert.alert(
-      "Cancelar servicio",
-      "¿Estás seguro?",
-      [
-        { text: "Mantener", style: "cancel" },
-        { text: "Sí, cancelar", style: "destructive",
-          onPress: async () => {
-            try {
-              await api.patch(`/service-requests/${request.id}/status`, { status: "cancelled" });
-              router.replace("/client/home");
-            } catch (err: any) {
-              Alert.alert("Error", err?.response?.data?.error || "No se pudo cancelar");
-            }
-          },
+    Alert.alert("Cancelar servicio", "¿Estás seguro?", [
+      { text: "Mantener", style: "cancel" },
+      {
+        text: "Sí, cancelar", style: "destructive",
+        onPress: async () => {
+          try {
+            await api.patch(`/service-requests/${request.id}/status`, { status: "cancelled" });
+            router.replace("/client/home");
+          } catch (err: any) {
+            Alert.alert("Error", err?.response?.data?.error || "No se pudo cancelar");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // ── Derivados ─────────────────────────────────────────────────────────────
@@ -244,21 +285,18 @@ export default function ClientStatus() {
   const pendingBids  = bids.filter((b) => b.status === "pending");
   const statusInfo   = STATUS_INFO[request?.status || "open"] || STATUS_INFO.open;
   const serviceActive = ["accepted", "on_route", "arrived"].includes(request?.status || "");
-  const showMap      = serviceActive || !!professionalCoords;
 
-  // Tiempo desde última actualización GPS
   const gpsAge = professionalCoords?.updated_at
     ? Math.round((Date.now() - professionalCoords.updated_at) / 1000)
     : null;
 
-  // Region del mapa — profesional tiene prioridad, luego lugar del servicio
   const mapRegion = useMemo(() => {
     if (professionalCoords) {
       return {
         latitude:      professionalCoords.latitude,
         longitude:     professionalCoords.longitude,
-        latitudeDelta:  0.01,
-        longitudeDelta: 0.01,
+        latitudeDelta:  0.015,
+        longitudeDelta: 0.015,
       };
     }
     if (request?.latitude && request?.longitude) {
@@ -305,16 +343,26 @@ export default function ClientStatus() {
       backgroundColor: palette.background, paddingBottom: 36,
     }}>
 
-      {/* ── MAPA — visible cuando hay profesional asignado ── */}
+      {/* ── MAPA ── */}
       {mapRegion && (
-        <View style={{ height: 280, position: "relative" }}>
+        <View style={{ height: 300, position: "relative" }}>
           <MapView
             ref={mapRef}
             provider={PROVIDER_GOOGLE}
             style={{ flex: 1 }}
             initialRegion={mapRegion}
           >
-            {/* Pin profesional — se mueve en tiempo real */}
+            {/* ── RUTA AZUL por calles reales ── */}
+            {routeCoords.length > 1 && (
+              <Polyline
+                coordinates={routeCoords}
+                strokeColor="#2196F3"
+                strokeWidth={4}
+                geodesic={true}
+              />
+            )}
+
+            {/* Pin profesional — azul, se mueve en tiempo real */}
             {professionalCoords && (
               <Marker
                 coordinate={professionalCoords}
@@ -322,14 +370,13 @@ export default function ClientStatus() {
                 description={
                   request.status === "arrived"
                     ? "Llegó a tu dirección"
-                    : gpsAge !== null
-                    ? `Actualizado hace ${gpsAge}s`
-                    : "En camino"
+                    : gpsAge !== null ? `Actualizado hace ${gpsAge}s` : "En camino"
                 }
                 pinColor="#2196F3"
               />
             )}
-            {/* Pin lugar del servicio — fijo */}
+
+            {/* Pin lugar del servicio — dorado, fijo */}
             {request.latitude && request.longitude && (
               <Marker
                 coordinate={{ latitude: request.latitude, longitude: request.longitude }}
@@ -340,13 +387,13 @@ export default function ClientStatus() {
             )}
           </MapView>
 
-          {/* Badge estado tracking */}
+          {/* Badge estado */}
           <View style={{
             position: "absolute", top: 10, left: 10,
             backgroundColor: "#000000bb", borderRadius: 8,
             paddingHorizontal: 10, paddingVertical: 6,
             borderWidth: 1,
-            borderColor: request.status === "arrived" ? "#9C27B0"
+            borderColor: request.status === "arrived"  ? "#9C27B0"
                        : request.status === "on_route" ? "#2196F3"
                        : "#555",
             flexDirection: "row", alignItems: "center", gap: 6,
@@ -357,9 +404,7 @@ export default function ClientStatus() {
                 ? (request.status === "arrived" ? "#9C27B0" : "#4caf50")
                 : "#555",
             }} />
-            <Text style={{
-              color: professionalCoords ? "#fff" : "#888", fontSize: 11,
-            }}>
+            <Text style={{ color: professionalCoords ? "#fff" : "#888", fontSize: 11 }}>
               {request.status === "arrived"
                 ? "📍 Profesional llegó"
                 : request.status === "on_route" && professionalCoords
@@ -369,6 +414,44 @@ export default function ClientStatus() {
                 : "Sin señal GPS"}
             </Text>
           </View>
+
+          {/* Badge ruta */}
+          {routeCoords.length > 1 && (
+            <View style={{
+              position: "absolute", top: 10, right: 10,
+              backgroundColor: "#000000bb", borderRadius: 8,
+              paddingHorizontal: 10, paddingVertical: 6,
+              borderWidth: 1, borderColor: "#2196F355",
+              flexDirection: "row", alignItems: "center", gap: 6,
+            }}>
+              <View style={{ width: 16, height: 3, backgroundColor: "#2196F3", borderRadius: 2 }} />
+              <Text style={{ color: "#2196F3", fontSize: 11 }}>
+                {loadingRoute ? "Actualizando..." : "Ruta activa"}
+              </Text>
+            </View>
+          )}
+
+          {/* Botón ver ambos pines */}
+          <TouchableOpacity
+            onPress={() => {
+              if (professionalCoords && request.latitude && request.longitude && mapRef.current) {
+                mapRef.current.fitToCoordinates(
+                  [
+                    { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
+                    { latitude: request.latitude!, longitude: request.longitude! },
+                  ],
+                  { edgePadding: { top: 60, right: 40, bottom: 40, left: 40 }, animated: true }
+                );
+              }
+            }}
+            style={{
+              position: "absolute", bottom: 12, right: 12,
+              backgroundColor: "#000000cc", borderRadius: 8,
+              padding: 10, borderWidth: 1, borderColor: "#444",
+            }}
+          >
+            <Text style={{ color: "#fff", fontSize: 18 }}>⊕</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -431,8 +514,7 @@ export default function ClientStatus() {
                   <TouchableOpacity
                     onPress={() => acceptBid(bid.id)}
                     disabled={actingBidId === bid.id}
-                    style={{ flex: 1, backgroundColor: "#0A7E07",
-                      padding: 10, borderRadius: 8 }}
+                    style={{ flex: 1, backgroundColor: "#0A7E07", padding: 10, borderRadius: 8 }}
                   >
                     <Text style={{ color: "#fff", textAlign: "center", fontWeight: "700" }}>
                       {actingBidId === bid.id ? "..." : "Aceptar"}
@@ -441,8 +523,7 @@ export default function ClientStatus() {
                   <TouchableOpacity
                     onPress={() => rejectBid(bid.id)}
                     disabled={actingBidId === bid.id}
-                    style={{ flex: 1, backgroundColor: "#b30000",
-                      padding: 10, borderRadius: 8 }}
+                    style={{ flex: 1, backgroundColor: "#b30000", padding: 10, borderRadius: 8 }}
                   >
                     <Text style={{ color: "#fff", textAlign: "center" }}>Rechazar</Text>
                   </TouchableOpacity>
@@ -452,7 +533,7 @@ export default function ClientStatus() {
           </>
         )}
 
-        {/* OFERTA ACEPTADA */}
+        {/* PROFESIONAL ASIGNADO */}
         {acceptedBid && (
           <View style={{
             backgroundColor: "#0a2a0a", padding: 14, borderRadius: 10,
@@ -506,7 +587,6 @@ export default function ClientStatus() {
           </View>
         )}
 
-        {/* BOTONES */}
         <TouchableOpacity
           onPress={loadStatus}
           style={{

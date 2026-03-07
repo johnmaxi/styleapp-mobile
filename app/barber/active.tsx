@@ -1,20 +1,18 @@
 // app/barber/active.tsx
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
+import { getRouteCoords, LatLng } from "@/utils/directions";
 import { getPalette } from "@/utils/palette";
 import database from "@react-native-firebase/database";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Alert,
-  Linking,
+  Alert, Linking,
   ScrollView,
-  Text,
-  TouchableOpacity,
-  View
+  Text, TouchableOpacity, View
 } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 
 type ServiceRequest = {
   id: number;
@@ -43,18 +41,15 @@ type GPSCoords = {
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
-  efectivo:  "Efectivo",
-  pse:       "PSE",
-  nequi:     "Nequi",
-  daviplata: "Daviplata",
+  efectivo: "Efectivo", pse: "PSE", nequi: "Nequi", daviplata: "Daviplata",
 };
 
 const STATUS_INFO: Record<string, { label: string; color: string }> = {
-  accepted:  { label: "Dirígete al cliente",    color: "#D4AF37" },
-  on_route:  { label: "En camino al cliente",   color: "#2196F3" },
-  arrived:   { label: "Llegaste al cliente",    color: "#9C27B0" },
-  completed: { label: "Servicio completado",    color: "#4caf50" },
-  cancelled: { label: "Servicio cancelado",     color: "#dd0000" },
+  accepted:  { label: "Dirígete al cliente",   color: "#D4AF37" },
+  on_route:  { label: "En camino al cliente",  color: "#2196F3" },
+  arrived:   { label: "Llegaste al cliente",   color: "#9C27B0" },
+  completed: { label: "Servicio completado",   color: "#4caf50" },
+  cancelled: { label: "Servicio cancelado",    color: "#dd0000" },
 };
 
 export default function BarberActive() {
@@ -66,16 +61,49 @@ export default function BarberActive() {
     price?: string; status?: string;
   }>();
 
-  const [request, setRequest]           = useState<ServiceRequest | null>(null);
-  const [clientInfo, setClientInfo]     = useState<ClientInfo | null>(null);
-  const [loading, setLoading]           = useState(false);
-  const [myCoords, setMyCoords]         = useState<GPSCoords | null>(null);
-  const [clientCoords, setClientCoords] = useState<GPSCoords | null>(null);
+  const [request, setRequest]               = useState<ServiceRequest | null>(null);
+  const [clientInfo, setClientInfo]         = useState<ClientInfo | null>(null);
+  const [loading, setLoading]               = useState(false);
+  const [myCoords, setMyCoords]             = useState<GPSCoords | null>(null);
+  const [clientCoords, setClientCoords]     = useState<GPSCoords | null>(null);
   const [trackingActive, setTrackingActive] = useState(false);
+  const [routeCoords, setRouteCoords]       = useState<LatLng[]>([]);
+  const [loadingRoute, setLoadingRoute]     = useState(false);
 
   const locationSub   = useRef<Location.LocationSubscription | null>(null);
   const mapRef        = useRef<MapView>(null);
   const clientInfoRef = useRef<ClientInfo | null>(null);
+  // Throttle: solo recalcular ruta cada 30 segundos o si el profesional se movió >50m
+  const lastRouteCalc = useRef<number>(0);
+  const lastRoutePos  = useRef<LatLng | null>(null);
+
+  // ── Calcular/actualizar ruta ───────────────────────────────────────────────
+  const updateRoute = useCallback(async (from: LatLng, to: LatLng) => {
+    const now = Date.now();
+    const lastPos = lastRoutePos.current;
+
+    // Calcular distancia desde último cálculo
+    let movedEnough = true;
+    if (lastPos) {
+      const dlat = (from.latitude - lastPos.latitude) * 111000;
+      const dlng = (from.longitude - lastPos.longitude) * 111000 * Math.cos(from.latitude * Math.PI / 180);
+      const dist = Math.sqrt(dlat * dlat + dlng * dlng);
+      movedEnough = dist > 50; // más de 50 metros
+    }
+
+    // Solo recalcular si: primera vez, movió >50m, o pasaron >30s
+    if (!lastPos || movedEnough || (now - lastRouteCalc.current) > 30000) {
+      setLoadingRoute(true);
+      lastRouteCalc.current = now;
+      lastRoutePos.current  = from;
+      try {
+        const coords = await getRouteCoords(from, to);
+        setRouteCoords(coords);
+      } finally {
+        setLoadingRoute(false);
+      }
+    }
+  }, []);
 
   // ── Cargar datos del servicio ─────────────────────────────────────────────
   const loadRequest = useCallback(async () => {
@@ -88,7 +116,8 @@ export default function BarberActive() {
           if (data?.id) {
             setRequest(data);
             if (data.latitude && data.longitude) {
-              setClientCoords({ latitude: data.latitude, longitude: data.longitude });
+              const dest = { latitude: data.latitude, longitude: data.longitude };
+              setClientCoords(dest);
             }
             if (data.client_id && !clientInfoRef.current) {
               try {
@@ -125,7 +154,21 @@ export default function BarberActive() {
     return () => clearInterval(timer);
   }, [loadRequest]);
 
-  // ── GPS: iniciar tracking ─────────────────────────────────────────────────
+  // Cuando tenemos mi posición Y el destino → calcular ruta
+  useEffect(() => {
+    if (myCoords && clientCoords && request?.status !== "arrived" && request?.status !== "completed") {
+      updateRoute(
+        { latitude: myCoords.latitude, longitude: myCoords.longitude },
+        { latitude: clientCoords.latitude, longitude: clientCoords.longitude }
+      );
+    }
+    // Si llegó o completó, limpiar ruta
+    if (request?.status === "arrived" || request?.status === "completed") {
+      setRouteCoords([]);
+    }
+  }, [myCoords, clientCoords, request?.status]);
+
+  // ── GPS Tracking ──────────────────────────────────────────────────────────
   const startTracking = useCallback(async () => {
     if (trackingActive || !params.id) return;
 
@@ -133,22 +176,19 @@ export default function BarberActive() {
     if (status !== "granted") {
       Alert.alert(
         "Permiso de ubicacion requerido",
-        "Ve a Ajustes > Permisos > Ubicacion y actívala para esta app.",
+        "Ve a Ajustes > Permisos > Ubicacion y actívala.",
         [{ text: "OK" }]
       );
       return;
     }
-
-    // También pedir permiso de background si es posible
     await Location.requestBackgroundPermissionsAsync().catch(() => {});
-
     setTrackingActive(true);
 
     locationSub.current = await Location.watchPositionAsync(
       {
         accuracy:         Location.Accuracy.BestForNavigation,
-        timeInterval:     3000,   // cada 3 segundos
-        distanceInterval: 5,      // o cada 5 metros
+        timeInterval:     3000,
+        distanceInterval: 5,
       },
       async (loc) => {
         const coords: GPSCoords = {
@@ -159,14 +199,12 @@ export default function BarberActive() {
         };
         setMyCoords(coords);
 
-        // Centrar mapa en mi posicion
         mapRef.current?.animateToRegion({
           ...coords,
           latitudeDelta:  0.008,
           longitudeDelta: 0.008,
         }, 300);
 
-        // Publicar en Firebase Realtime Database
         try {
           await database()
             .ref(`tracking/service_${params.id}`)
@@ -182,14 +220,12 @@ export default function BarberActive() {
     locationSub.current?.remove();
     locationSub.current = null;
     setTrackingActive(false);
+    setRouteCoords([]);
     if (params.id) {
-      try {
-        await database().ref(`tracking/service_${params.id}`).remove();
-      } catch {}
+      try { await database().ref(`tracking/service_${params.id}`).remove(); } catch {}
     }
   }, [params.id]);
 
-  // Auto-iniciar tracking cuando el status es accepted o on_route
   useEffect(() => {
     const s = request?.status;
     if ((s === "accepted" || s === "on_route" || s === "arrived") && !trackingActive) {
@@ -212,10 +248,7 @@ export default function BarberActive() {
       await api.patch(`/service-requests/${request.id}/status`, { status: newStatus });
       setRequest((prev) => prev ? { ...prev, status: newStatus } : prev);
 
-      if (newStatus === "on_route") {
-        // Tracking ya debería estar activo, pero por si acaso
-        if (!trackingActive) startTracking();
-      }
+      if (newStatus === "on_route" && !trackingActive) startTracking();
 
       if (newStatus === "completed") {
         await stopTracking();
@@ -242,7 +275,7 @@ export default function BarberActive() {
       `Confirma que llegaste a:\n${request?.address || "la ubicacion del cliente"}`,
       [
         { text: "No", style: "cancel" },
-        { text: "Si, llegue", onPress: () => updateStatus("arrived") },
+        { text: "Sí, llegue", onPress: () => updateStatus("arrived") },
       ]
     );
   };
@@ -253,7 +286,7 @@ export default function BarberActive() {
       "Confirmas que el servicio fue completado?",
       [
         { text: "Cancelar", style: "cancel" },
-        { text: "Si, finalizar", onPress: () => updateStatus("completed") },
+        { text: "Sí, finalizar", onPress: () => updateStatus("completed") },
       ]
     );
   };
@@ -261,22 +294,18 @@ export default function BarberActive() {
   const statusInfo = STATUS_INFO[request?.status || "accepted"] || STATUS_INFO.accepted;
 
   const mapRegion = myCoords
-    ? { ...myCoords,     latitudeDelta: 0.008, longitudeDelta: 0.008 }
+    ? { ...myCoords,     latitudeDelta: 0.015, longitudeDelta: 0.015 }
     : clientCoords
     ? { ...clientCoords, latitudeDelta: 0.015, longitudeDelta: 0.015 }
     : null;
-
-  const PAYMENT_LABELS: Record<string, string> = {
-    efectivo: "Efectivo", pse: "PSE", nequi: "Nequi", daviplata: "Daviplata",
-  };
 
   return (
     <ScrollView contentContainerStyle={{
       backgroundColor: palette.background, paddingBottom: 40,
     }}>
 
-      {/* ── MAPA — siempre visible ── */}
-      <View style={{ height: 280, backgroundColor: "#111" }}>
+      {/* ── MAPA ── */}
+      <View style={{ height: 320, backgroundColor: "#111" }}>
         {mapRegion ? (
           <MapView
             ref={mapRef}
@@ -284,10 +313,20 @@ export default function BarberActive() {
             style={{ flex: 1 }}
             initialRegion={mapRegion}
             showsUserLocation={false}
-            showsMyLocationButton={false}
             showsTraffic={false}
           >
-            {/* Pin del profesional (azul) */}
+            {/* ── RUTA AZUL por calles reales ── */}
+            {routeCoords.length > 1 && (
+              <Polyline
+                coordinates={routeCoords}
+                strokeColor="#2196F3"
+                strokeWidth={4}
+                lineDashPattern={undefined}
+                geodesic={true}
+              />
+            )}
+
+            {/* Pin profesional — azul */}
             {myCoords && (
               <Marker
                 coordinate={myCoords}
@@ -295,7 +334,8 @@ export default function BarberActive() {
                 pinColor="#2196F3"
               />
             )}
-            {/* Pin del cliente / lugar del servicio (dorado) */}
+
+            {/* Pin destino — dorado */}
             {clientCoords && (
               <Marker
                 coordinate={clientCoords}
@@ -308,13 +348,11 @@ export default function BarberActive() {
         ) : (
           <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 8 }}>
             <Text style={{ color: "#555", fontSize: 13 }}>Cargando mapa...</Text>
-            <Text style={{ color: "#444", fontSize: 11 }}>
-              Asegúrate de tener GPS activado
-            </Text>
+            <Text style={{ color: "#444", fontSize: 11 }}>Asegúrate de tener GPS activado</Text>
           </View>
         )}
 
-        {/* Overlay: estado GPS */}
+        {/* Badge GPS */}
         <View style={{
           position: "absolute", top: 10, left: 10,
           backgroundColor: trackingActive ? "#0a2a0acc" : "#1a1a1acc",
@@ -327,18 +365,45 @@ export default function BarberActive() {
             backgroundColor: trackingActive ? "#4caf50" : "#555",
           }} />
           <Text style={{ color: trackingActive ? "#4caf50" : "#888", fontSize: 11 }}>
-            {trackingActive ? "GPS activo — enviando ubicacion" : "GPS inactivo"}
+            {trackingActive ? "GPS activo" : "GPS inactivo"}
           </Text>
         </View>
 
-        {/* Boton centrar */}
+        {/* Badge ruta */}
+        {routeCoords.length > 1 && (
+          <View style={{
+            position: "absolute", top: 10, right: 10,
+            backgroundColor: "#00000099",
+            borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+            borderWidth: 1, borderColor: "#2196F355",
+            flexDirection: "row", alignItems: "center", gap: 6,
+          }}>
+            <View style={{ width: 16, height: 3, backgroundColor: "#2196F3", borderRadius: 2 }} />
+            <Text style={{ color: "#2196F3", fontSize: 11 }}>
+              {loadingRoute ? "Actualizando ruta..." : "Ruta activa"}
+            </Text>
+          </View>
+        )}
+
+        {/* Botón centrar */}
         <TouchableOpacity
           onPress={() => {
-            const coords = myCoords || clientCoords;
-            if (coords && mapRef.current) {
-              mapRef.current.animateToRegion({
-                ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01,
-              }, 500);
+            // Si hay ruta, mostrar ambos puntos
+            if (myCoords && clientCoords && mapRef.current) {
+              mapRef.current.fitToCoordinates(
+                [
+                  { latitude: myCoords.latitude, longitude: myCoords.longitude },
+                  { latitude: clientCoords.latitude, longitude: clientCoords.longitude },
+                ],
+                { edgePadding: { top: 60, right: 40, bottom: 40, left: 40 }, animated: true }
+              );
+            } else {
+              const coords = myCoords || clientCoords;
+              if (coords && mapRef.current) {
+                mapRef.current.animateToRegion(
+                  { ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 500
+                );
+              }
             }
           }}
           style={{
@@ -347,7 +412,7 @@ export default function BarberActive() {
             padding: 10, borderWidth: 1, borderColor: "#444",
           }}
         >
-          <Text style={{ color: "#fff", fontSize: 18 }}>◎</Text>
+          <Text style={{ color: "#fff", fontSize: 18 }}>⊕</Text>
         </TouchableOpacity>
       </View>
 
@@ -423,10 +488,10 @@ export default function BarberActive() {
           </TouchableOpacity>
         </View>
 
-        {/* ── ACCIONES SEGÚN STATUS ── */}
-
-        {/* GPS inactivo — botón para reactivar */}
-        {!trackingActive && (request?.status === "accepted" || request?.status === "on_route" || request?.status === "arrived") && (
+        {/* GPS inactivo */}
+        {!trackingActive && (
+          ["accepted", "on_route", "arrived"].includes(request?.status || "")
+        ) && (
           <TouchableOpacity
             onPress={startTracking}
             style={{
@@ -438,7 +503,7 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
-        {/* ACCEPTED → Estoy en camino */}
+        {/* ACCEPTED → En camino */}
         {request?.status === "accepted" && (
           <TouchableOpacity
             onPress={() => updateStatus("on_route")}
@@ -454,7 +519,7 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
-        {/* ON_ROUTE → Llegué al destino */}
+        {/* ON_ROUTE → Llegué */}
         {request?.status === "on_route" && (
           <TouchableOpacity
             onPress={confirmArrived}
@@ -470,7 +535,7 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
-        {/* ARRIVED → Finalizar servicio */}
+        {/* ARRIVED → Finalizar */}
         {request?.status === "arrived" && (
           <TouchableOpacity
             onPress={confirmComplete}
@@ -486,7 +551,7 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
-        {/* ON_ROUTE también puede finalizar directo si ya está con el cliente */}
+        {/* ON_ROUTE puede finalizar directo también */}
         {request?.status === "on_route" && (
           <TouchableOpacity
             onPress={confirmComplete}
