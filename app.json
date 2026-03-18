@@ -27,13 +27,18 @@
     "web": {
       "favicon": "./assets/icon.png"
     },
-    "plugins": ["expo-router", "expo-secure-store"],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {},
-      "eas": {}
+      "eas": {
+        "projectId": "927dfa9c-986b-4be2-9145-274583151d55"
+      }
     },
     "owner": "johnare"
   }
