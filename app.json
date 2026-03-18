@@ -27,19 +27,14 @@
     "web": {
       "favicon": "./assets/icon.png"
     },
-    "plugins": [
-      "expo-router",
-      "expo-secure-store"
-    ],
+    "plugins": ["expo-router", "expo-secure-store"],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "2117fc82-a5a4-49c3-8090-776d7f724a7d"
-      }
+      "eas": {}
     },
-    "owner": "johnar10"
+    "owner": "johnare"
   }
 }
