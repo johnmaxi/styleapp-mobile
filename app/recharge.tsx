@@ -14,16 +14,19 @@ import {
 } from "react-native";
 import api from "../api";
 
-const WOMPI_PUBLIC_KEY = "pub_prod_GW6xxfe09CgSSEwVnN8gu1xWx4HoliDi";
 const AMOUNTS = [10000, 20000, 50000, 100000, 200000];
 
+// Detectar si estamos en modo pruebas (ACCESS TOKEN empieza con TEST-)
+// El backend decide qué URL usar (init_point vs sandbox_init_point)
+const IS_SANDBOX = false; // cambiar a true para pruebas locales
+
 export default function RechargeScreen() {
-  const router = useRouter();
+  const router  = useRouter();
   const { user } = useAuth();
   const palette = getPalette(user?.gender);
 
-  const [amount, setAmount]           = useState("");
-  const [loading, setLoading]         = useState(false);
+  const [amount,       setAmount]       = useState("");
+  const [loading,      setLoading]      = useState(false);
   const [customAmount, setCustomAmount] = useState(false);
 
   const selectedAmount = Number(amount.replace(/\D/g, "")) || 0;
@@ -42,34 +45,23 @@ export default function RechargeScreen() {
     try {
       const amountInCents = selectedAmount * 100;
 
-      const res = await api.post("/payments/wompi-link", {
+      const res = await api.post("/payments/mp-preference", {
         amount_in_cents: amountInCents,
       });
 
-      const { reference, integrity_signature, redirect_url } = res.data;
+      const { checkout_url, sandbox_url, reference } = res.data;
 
-      if (!reference || !integrity_signature) {
-        Alert.alert("Error", "El servidor no devolvio los datos de pago correctamente");
+      if (!checkout_url) {
+        Alert.alert("Error", "No se pudo obtener el link de pago");
         return;
       }
 
-      // FIX: construir URL con URLSearchParams para codificar correctamente
-      // Wompi requiere "signature:integrity" con los dos puntos literales en el nombre del param
-      const params = new URLSearchParams();
-      params.append("public-key",              WOMPI_PUBLIC_KEY);
-      params.append("currency",                "COP");
-      params.append("amount-in-cents",         String(amountInCents));
-      params.append("reference",               reference);
-      params.append("signature:integrity",     integrity_signature);
-      params.append("redirect-url",            redirect_url);
-      params.append("customer-data:email",     user?.email || "");
-      params.append("customer-data:full-name", user?.name  || "");
+      // En pruebas usar sandbox_url, en produccion usar checkout_url
+      const urlToOpen = IS_SANDBOX ? (sandbox_url || checkout_url) : checkout_url;
 
-      const wompiUrl = `https://checkout.wompi.co/p/?${params.toString()}`;
+      console.log("MP URL:", urlToOpen?.substring(0, 80) + "...");
 
-      console.log("Wompi URL:", wompiUrl.substring(0, 100) + "...");
-
-      const result = await WebBrowser.openBrowserAsync(wompiUrl, {
+      const result = await WebBrowser.openBrowserAsync(urlToOpen, {
         dismissButtonStyle: "close",
         presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
       });
@@ -78,11 +70,11 @@ export default function RechargeScreen() {
         Alert.alert(
           "Recarga",
           "Si completaste el pago, tu saldo se actualizara en unos segundos.",
-          [{ text: "OK", onPress: () => router.back() }]
+          [{ text: "Verificar", onPress: () => router.back() }]
         );
       }
     } catch (err: any) {
-      console.log("WOMPI ERROR:", JSON.stringify(err?.response?.data));
+      console.log("MP ERROR:", JSON.stringify(err?.response?.data));
       Alert.alert(
         "Error",
         err?.response?.data?.error || err?.message || "No se pudo iniciar el pago"
@@ -94,8 +86,10 @@ export default function RechargeScreen() {
 
   return (
     <ScrollView contentContainerStyle={{
-      padding: 24, backgroundColor: palette.background,
-      gap: 14, paddingBottom: 48,
+      padding: 24,
+      backgroundColor: palette.background,
+      gap: 14,
+      paddingBottom: 48,
     }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>
         Recargar saldo
@@ -117,7 +111,8 @@ export default function RechargeScreen() {
               borderWidth: 1,
               borderColor: selectedAmount === a && !customAmount ? palette.primary : "#444",
               borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16,
-              backgroundColor: selectedAmount === a && !customAmount ? palette.primary + "22" : "transparent",
+              backgroundColor: selectedAmount === a && !customAmount
+                ? palette.primary + "22" : "transparent",
             }}
           >
             <Text style={{
@@ -183,39 +178,53 @@ export default function RechargeScreen() {
             </Text>
           </Text>
           <Text style={{ color: "#888", fontSize: 11, marginTop: 8 }}>
-            Metodos: Tarjeta, PSE, Nequi, Bancolombia
+            Metodos: Tarjeta de credito/debito, PSE, Nequi, Bancolombia
           </Text>
         </View>
       )}
+
+      {/* LOGO MP */}
+      <View style={{
+        flexDirection: "row", alignItems: "center", justifyContent: "center",
+        gap: 8, paddingVertical: 4,
+      }}>
+        <Text style={{ color: "#555", fontSize: 12 }}>Pagos seguros con</Text>
+        <Text style={{ color: "#009EE3", fontWeight: "900", fontSize: 14 }}>
+          Mercado Pago
+        </Text>
+      </View>
 
       {/* BOTON PAGAR */}
       <TouchableOpacity
         onPress={handleRecharge}
         disabled={loading || selectedAmount < 1000}
         style={{
-          backgroundColor: selectedAmount >= 1000 ? palette.primary : "#333",
+          backgroundColor: selectedAmount >= 1000 ? "#009EE3" : "#333",
           padding: 16, borderRadius: 10, alignItems: "center",
           opacity: loading ? 0.7 : 1,
         }}
       >
         <Text style={{
-          color: selectedAmount >= 1000 ? "#000" : "#666",
+          color: selectedAmount >= 1000 ? "#fff" : "#666",
           fontWeight: "900", fontSize: 16,
         }}>
-          {loading ? "Abriendo pasarela..." : "Pagar con Wompi"}
+          {loading ? "Abriendo pasarela..." : "Pagar con Mercado Pago"}
         </Text>
       </TouchableOpacity>
 
       {selectedAmount >= 1000 && (
         <Text style={{ color: "#666", fontSize: 11, textAlign: "center" }}>
-          Seras redirigido a la pasarela segura de Wompi.
+          Seras redirigido a la pasarela segura de Mercado Pago.
           Tu saldo se actualizara automaticamente al confirmar el pago.
         </Text>
       )}
 
       <TouchableOpacity
         onPress={() => router.back()}
-        style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 10, alignItems: "center" }}
+        style={{
+          borderWidth: 1, borderColor: "#555",
+          padding: 12, borderRadius: 10, alignItems: "center",
+        }}
       >
         <Text style={{ color: "#aaa" }}>Volver</Text>
       </TouchableOpacity>
