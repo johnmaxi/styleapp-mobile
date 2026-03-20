@@ -1,8 +1,4 @@
 // utils/sounds.ts
-// Sonidos usando expo-av con archivos locales
-// INSTALACIÓN: npx expo install expo-av
-// ARCHIVOS: crea la carpeta assets/sounds/ y descarga los mp3 de mixkit.co
-
 import { Audio } from "expo-av";
 import { Platform, Vibration } from "react-native";
 import { useEffect, useRef } from "react";
@@ -17,21 +13,6 @@ export type SoundType =
   | "payment_received"
   | "notification";
 
-// ── Mapeo de archivos locales ─────────────────────────────────────────────
-// Descarga estos archivos de https://mixkit.co/free-sound-effects/
-// y ponlos en assets/sounds/
-const SOUND_FILES: Record<SoundType, any> = {
-  new_request:      require("../assets/sounds/new-request.mp3"),
-  service_accepted: require("../assets/sounds/accepted.mp3"),
-  counteroffer:     require("../assets/sounds/counteroffer.mp3"),
-  on_route:         require("../assets/sounds/on-route.mp3"),
-  arrived:          require("../assets/sounds/arrived.mp3"),
-  service_complete: require("../assets/sounds/complete.mp3"),
-  payment_received: require("../assets/sounds/payment.mp3"),
-  notification:     require("../assets/sounds/notification.mp3"),
-};
-
-// ── Vibración por tipo ────────────────────────────────────────────────────
 const VIBRATION_PATTERNS: Record<SoundType, number[]> = {
   new_request:      [0, 200, 100, 200, 100, 400],
   service_accepted: [0, 500],
@@ -43,8 +24,19 @@ const VIBRATION_PATTERNS: Record<SoundType, number[]> = {
   notification:     [0, 200],
 };
 
-let audioInitialized = false;
+const SOUND_FILES: Record<SoundType, any> = {
+  new_request:      require("../assets/sounds/new-request.wav"),
+  service_accepted: require("../assets/sounds/accepted.wav"),
+  counteroffer:     require("../assets/sounds/counteroffer.wav"),
+  on_route:         require("../assets/sounds/on-route.wav"),
+  arrived:          require("../assets/sounds/arrived.wav"),
+  service_complete: require("../assets/sounds/complete.wav"),
+  payment_received: require("../assets/sounds/payment.wav"),
+  notification:     require("../assets/sounds/notification.wav"),
+};
+
 const soundCache: Partial<Record<SoundType, Audio.Sound>> = {};
+let audioInitialized = false;
 
 async function initAudio() {
   if (audioInitialized) return;
@@ -69,14 +61,13 @@ export async function playSound(type: SoundType): Promise<void> {
       Vibration.vibrate();
     }
 
-    // Reproducir desde cache si existe
+    // Reproducir desde cache
     if (soundCache[type]) {
       try {
         await soundCache[type]!.setPositionAsync(0);
         await soundCache[type]!.playAsync();
         return;
       } catch {
-        // Si falla el cache, recrear
         try { await soundCache[type]!.unloadAsync(); } catch {}
         delete soundCache[type];
       }
@@ -89,23 +80,16 @@ export async function playSound(type: SoundType): Promise<void> {
     );
     soundCache[type] = sound;
 
-    // Limpiar al terminar
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (status.isLoaded && status.didJustFinish) {
-        // No descargar — mantener en cache para próxima vez
-      }
-    });
   } catch (err) {
     console.warn(`Sound [${type}] error:`, err);
-    // Vibrar igual aunque falle el audio
     Vibration.vibrate(VIBRATION_PATTERNS[type]);
   }
 }
 
 export async function preloadSounds(): Promise<void> {
   await initAudio();
-  const types: SoundType[] = ["new_request", "service_accepted", "counteroffer", "notification"];
-  for (const type of types) {
+  const priority: SoundType[] = ["new_request", "notification", "counteroffer"];
+  for (const type of priority) {
     try {
       if (!soundCache[type]) {
         const { sound } = await Audio.Sound.createAsync(SOUND_FILES[type]);
@@ -121,7 +105,6 @@ export async function unloadSounds(): Promise<void> {
   }
 }
 
-// Hook para sonido en cambio de valor
 export function useSoundOnChange(type: SoundType, value: any, condition = true) {
   const prevRef = useRef<any>(undefined);
   useEffect(() => {
