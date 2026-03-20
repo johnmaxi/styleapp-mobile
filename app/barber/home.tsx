@@ -3,11 +3,12 @@ import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, ScrollView,
   Switch, Text, TouchableOpacity, View,
 } from "react-native";
+import { playSound } from "@/utils/sounds";
 
 type MyBid = {
   id: number;
@@ -44,6 +45,10 @@ export default function BarberHome() {
   const [isActive, setIsActive]           = useState(true);
   const [togglingActive, setTogglingActive] = useState(false);
 
+  // Para detectar nuevas solicitudes y disparar sonido
+  const prevOpenCountRef = useRef<number>(-1);
+  const prevBidsCountRef = useRef<number>(-1);
+
   const displayName = user?.name?.split(" ")[0] || "Profesional";
   const roleLabel   = ROLE_LABELS[user?.role || ""] || "Profesional";
 
@@ -63,20 +68,41 @@ export default function BarberHome() {
           : Array.isArray(assignedRes.data?.data)
           ? assignedRes.data.data : [];
         const active = assigned.find(
-          (s) => s.status === "accepted" || s.status === "on_route"
+          (s) => s.status === "accepted" || s.status === "on_route" || s.status === "arrived"
         );
         setActiveService(active || null);
       } catch {}
 
-      // Bids pendientes
+      // Bids pendientes — sonido si llega una nueva aceptación
       try {
         const bidsRes = await api.get("/bids/my-bids");
         const bids: MyBid[] = Array.isArray(bidsRes.data)
           ? bidsRes.data
           : Array.isArray(bidsRes.data?.data)
           ? bidsRes.data.data : [];
-        setMyBids(bids.filter((b) => b.status === "pending"));
+        const pending = bids.filter((b) => b.status === "pending");
+        setMyBids(pending);
+
+        // Sonido si se aceptó una bid (bajó el count de pending)
+        if (prevBidsCountRef.current > 0 && pending.length < prevBidsCountRef.current) {
+          playSound("service_accepted");
+        }
+        prevBidsCountRef.current = pending.length;
       } catch {}
+
+      // Solicitudes abiertas — sonido si llega nueva solicitud
+      try {
+        const openRes = await api.get("/service-requests/open");
+        const open = Array.isArray(openRes.data)
+          ? openRes.data
+          : openRes.data?.data || [];
+
+        if (prevOpenCountRef.current >= 0 && open.length > prevOpenCountRef.current) {
+          playSound("new_request");
+        }
+        prevOpenCountRef.current = open.length;
+      } catch {}
+
     } finally {
       setLoading(false);
     }
@@ -119,7 +145,7 @@ export default function BarberHome() {
         service_type: activeService.service_type || "",
         address:      activeService.address || "",
         price:        String(activeService.price || 0),
-        status:       activeService.status || "accepted",  // FIX: pasar status real
+        status:       activeService.status || "accepted",
       },
     });
   };
@@ -153,7 +179,6 @@ export default function BarberHome() {
       }}>
         <View style={{ flex: 1, gap: 4 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {/* Dot indicador */}
             <View style={{
               width: 10, height: 10, borderRadius: 5,
               backgroundColor: isActive ? "#4caf50" : "#555",
@@ -181,21 +206,27 @@ export default function BarberHome() {
         />
       </View>
 
-      {/* ── SERVICIO ACTIVO ── recuperado aunque se haya salido de la app */}
+      {/* ── SERVICIO ACTIVO ── */}
       {activeService && (
         <TouchableOpacity
           onPress={goToActiveService}
           style={{
             backgroundColor: "#0a1a2a",
             padding: 16, borderRadius: 12, borderWidth: 2,
-            borderColor: activeService.status === "on_route" ? "#2196F3" : "#0A7E07",
+            borderColor: activeService.status === "on_route" ? "#2196F3"
+                       : activeService.status === "arrived"  ? "#9C27B0"
+                       : "#0A7E07",
           }}
         >
           <Text style={{
-            color: activeService.status === "on_route" ? "#2196F3" : "#4caf50",
+            color: activeService.status === "on_route" ? "#2196F3"
+                 : activeService.status === "arrived"  ? "#9C27B0"
+                 : "#4caf50",
             fontWeight: "900", fontSize: 16,
           }}>
-            {activeService.status === "on_route" ? "En camino al cliente" : "Tienes un servicio activo"}
+            {activeService.status === "on_route" ? "🚗 En camino al cliente"
+           : activeService.status === "arrived"  ? "📍 Llegaste al cliente"
+           : "✅ Tienes un servicio activo"}
           </Text>
           <Text style={{ color: "#ccc", marginTop: 4 }}>
             {activeService.service_type || "Servicio"} — Solicitud #{activeService.id}

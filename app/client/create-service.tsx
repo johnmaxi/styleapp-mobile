@@ -251,31 +251,68 @@ export default function CreateService() {
       });
 
       if (result.type === "dismiss" || result.type === "cancel") {
-        // Verificar si el pago fue exitoso
+        // Verificar si el pago fue exitoso — con reintentos para dar tiempo al webhook
         Alert.alert("Verificar pago", "¿Completaste el pago en MercadoPago?", [
           {
             text: "Sí, pagué",
             onPress: async () => {
-              try {
-                const checkRes = await api.get(
-                  `/payments/verify-service-payment/${reference}`,
-                );
-                if (checkRes.data.paid) {
-                  setMpPaid(true);
-                  Alert.alert(
-                    "✅ Pago confirmado",
-                    "Ahora puedes publicar el servicio",
+              setPayingMP(true);
+              // Reintentar hasta 5 veces con 2s de espera entre intentos
+              let paid = false;
+              for (let i = 0; i < 5; i++) {
+                try {
+                  await new Promise((r) =>
+                    setTimeout(r, i === 0 ? 1000 : 2000),
                   );
-                } else {
-                  Alert.alert(
-                    "❌ Pago no confirmado",
-                    "El pago no fue procesado. Intenta de nuevo o cambia el método de pago.",
+                  const checkRes = await api.get(
+                    `/payments/verify-service-payment/${reference}`,
                   );
-                }
-              } catch {
+                  if (checkRes.data.paid) {
+                    paid = true;
+                    break;
+                  }
+                } catch {}
+              }
+              setPayingMP(false);
+              if (paid) {
+                setMpPaid(true);
                 Alert.alert(
-                  "Error",
-                  "No se pudo verificar el pago. Intenta de nuevo.",
+                  "✅ Pago confirmado",
+                  "Ahora puedes publicar el servicio",
+                );
+              } else {
+                Alert.alert(
+                  "❌ Pago no confirmado",
+                  "No se pudo verificar el pago. Si ya pagaste espera unos segundos y toca 'Verificar pago' de nuevo.",
+                  [
+                    {
+                      text: "Verificar de nuevo",
+                      onPress: async () => {
+                        setPayingMP(true);
+                        try {
+                          const checkRes = await api.get(
+                            `/payments/verify-service-payment/${reference}`,
+                          );
+                          setPayingMP(false);
+                          if (checkRes.data.paid) {
+                            setMpPaid(true);
+                            Alert.alert(
+                              "✅ Pago confirmado",
+                              "Ahora puedes publicar el servicio",
+                            );
+                          } else {
+                            Alert.alert(
+                              "Sin confirmar",
+                              "Intenta de nuevo en unos segundos.",
+                            );
+                          }
+                        } catch {
+                          setPayingMP(false);
+                        }
+                      },
+                    },
+                    { text: "Cambiar método", style: "cancel" },
+                  ],
                 );
               }
             },

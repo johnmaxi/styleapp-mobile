@@ -3,6 +3,8 @@ import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { getRouteCoords, LatLng } from "@/utils/directions";
 import { getPalette } from "@/utils/palette";
+import { ClipperMarker, DestinationMarker } from "@/utils/mapMarkers";
+import { playSound } from "@/utils/sounds";
 import database from "@react-native-firebase/database";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -51,7 +53,7 @@ const STATUS_INFO: Record<string, { text: string; color: string; emoji: string }
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
-  efectivo: "Efectivo", pse: "PSE", nequi: "Nequi", daviplata: "Daviplata",
+  efectivo: "Efectivo", pse: "PSE", nequi: "Nequi", tarjeta: "Tarjeta",
 };
 
 export default function ClientStatus() {
@@ -73,24 +75,22 @@ export default function ClientStatus() {
 
   const completedAlertShown = useRef(false);
   const arrivedAlertShown   = useRef(false);
+  const prevBidsCount       = useRef(-1);
+  const prevStatus          = useRef<string>("");
   const mapRef = useRef<MapView>(null);
 
-  // Throttle ruta igual que en barber
   const lastRouteCalc = useRef<number>(0);
   const lastRoutePos  = useRef<LatLng | null>(null);
 
-  // ── Calcular ruta cuando el profesional se mueve ──────────────────────────
   const updateRoute = useCallback(async (from: LatLng, to: LatLng) => {
     const now     = Date.now();
     const lastPos = lastRoutePos.current;
-
     let movedEnough = true;
     if (lastPos) {
       const dlat = (from.latitude - lastPos.latitude) * 111000;
       const dlng = (from.longitude - lastPos.longitude) * 111000 * Math.cos(from.latitude * Math.PI / 180);
       movedEnough = Math.sqrt(dlat * dlat + dlng * dlng) > 50;
     }
-
     if (!lastPos || movedEnough || (now - lastRouteCalc.current) > 30000) {
       setLoadingRoute(true);
       lastRouteCalc.current = now;
@@ -104,47 +104,36 @@ export default function ClientStatus() {
     }
   }, []);
 
-  // ── Firebase: escuchar ubicacion del profesional ──────────────────────────
+  // ── Firebase: escuchar ubicacion del profesional ──────────────────────
   useEffect(() => {
     if (!params.id) return;
     const ref = database().ref(`tracking/service_${params.id}`);
-
     const onValue = ref.on("value", (snap) => {
       const data = snap.val();
       if (data?.latitude && data?.longitude) {
         setProfessionalCoords(data as TrackingData);
         mapRef.current?.animateToRegion({
-          latitude:      data.latitude,
-          longitude:     data.longitude,
-          latitudeDelta:  0.012,
-          longitudeDelta: 0.012,
+          latitude: data.latitude, longitude: data.longitude,
+          latitudeDelta: 0.012, longitudeDelta: 0.012,
         }, 600);
       }
     });
-
     return () => ref.off("value", onValue);
   }, [params.id]);
 
-  // Actualizar ruta cuando el profesional se mueve y hay destino
   useEffect(() => {
-    if (
-      professionalCoords &&
-      request?.latitude &&
-      request?.longitude &&
-      request.status === "on_route"
-    ) {
+    if (professionalCoords && request?.latitude && request?.longitude && request.status === "on_route") {
       updateRoute(
         { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
         { latitude: request.latitude, longitude: request.longitude }
       );
     }
-    // Limpiar ruta si llegó
     if (request?.status === "arrived" || request?.status === "completed") {
       setRouteCoords([]);
     }
   }, [professionalCoords, request?.latitude, request?.longitude, request?.status]);
 
-  // ── Carga del servicio ────────────────────────────────────────────────────
+  // ── Carga del servicio ────────────────────────────────────────────────
   const getRequestById = async (id: number): Promise<ServiceRequest | null> => {
     for (const path of [`/service-requests/${id}`, `/service-request/${id}`]) {
       try {
@@ -183,9 +172,8 @@ export default function ClientStatus() {
         current = await getRequestById(Number(params.id));
         if (!current) {
           current = {
-            id:        Number(params.id),
-            service_type: params.service_type,
-            address:   params.address,
+            id: Number(params.id), service_type: params.service_type,
+            address: params.address,
             price:     params.price     ? Number(params.price)     : undefined,
             latitude:  params.latitude  ? Number(params.latitude)  : undefined,
             longitude: params.longitude ? Number(params.longitude) : undefined,
@@ -194,14 +182,35 @@ export default function ClientStatus() {
         }
       }
       if (!current) current = await getActiveRequest();
-      if (current) setBids(await getBids(current.id));
+
+      if (current) {
+        const newBids = await getBids(current.id);
+        // Sonido al llegar nueva contraoferta
+        if (prevBidsCount.current >= 0 && newBids.length > prevBidsCount.current) {
+          playSound("counteroffer");
+        }
+        prevBidsCount.current = newBids.length;
+        setBids(newBids);
+
+        // Sonidos al cambiar estado
+        if (prevStatus.current && current.status !== prevStatus.current) {
+          if (current.status === "accepted")  playSound("service_accepted");
+          if (current.status === "on_route")  playSound("on_route");
+          if (current.status === "arrived")   playSound("arrived");
+          if (current.status === "completed") playSound("service_complete");
+        }
+        prevStatus.current = current.status || "";
+      }
+
       setRequest(current);
 
+      // Alerta de llegada
       if (current?.status === "arrived" && !arrivedAlertShown.current) {
         arrivedAlertShown.current = true;
         Alert.alert("📍 El profesional llegó", "Tu profesional llegó a la dirección del servicio.");
       }
 
+      // Alerta de servicio completado
       if (current?.status === "completed" && !completedAlertShown.current) {
         completedAlertShown.current = true;
         setTimeout(() => {
@@ -240,11 +249,12 @@ export default function ClientStatus() {
     return () => clearInterval(timer);
   }, [loadStatus]);
 
-  // ── Acciones ──────────────────────────────────────────────────────────────
+  // ── Acciones ──────────────────────────────────────────────────────────
   const acceptBid = async (bidId: number) => {
     try {
       setActingBidId(bidId);
       await api.patch(`/bids/accept/${bidId}`);
+      playSound("service_accepted");
       Alert.alert("Oferta aceptada", "El profesional fue asignado.");
       await loadStatus();
     } catch (err: any) {
@@ -280,7 +290,6 @@ export default function ClientStatus() {
     ]);
   };
 
-  // ── Derivados ─────────────────────────────────────────────────────────────
   const acceptedBid  = bids.find((b) => b.status === "accepted");
   const pendingBids  = bids.filter((b) => b.status === "pending");
   const statusInfo   = STATUS_INFO[request?.status || "open"] || STATUS_INFO.open;
@@ -291,30 +300,14 @@ export default function ClientStatus() {
     : null;
 
   const mapRegion = useMemo(() => {
-    if (professionalCoords) {
-      return {
-        latitude:      professionalCoords.latitude,
-        longitude:     professionalCoords.longitude,
-        latitudeDelta:  0.015,
-        longitudeDelta: 0.015,
-      };
-    }
-    if (request?.latitude && request?.longitude) {
-      return {
-        latitude:      request.latitude,
-        longitude:     request.longitude,
-        latitudeDelta:  0.015,
-        longitudeDelta: 0.015,
-      };
-    }
+    if (professionalCoords) return { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 };
+    if (request?.latitude && request?.longitude) return { latitude: request.latitude, longitude: request.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 };
     return null;
   }, [professionalCoords, request?.latitude, request?.longitude]);
 
-  // ── Render ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center",
-        backgroundColor: palette.background }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
         <ActivityIndicator size="large" color={palette.primary} />
       </View>
     );
@@ -322,15 +315,11 @@ export default function ClientStatus() {
 
   if (!request) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center",
-        padding: 24, backgroundColor: palette.background }}>
-        <Text style={{ color: palette.text, marginBottom: 12 }}>
-          No tienes solicitudes activas.
-        </Text>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: palette.background }}>
+        <Text style={{ color: palette.text, marginBottom: 12 }}>No tienes solicitudes activas.</Text>
         <TouchableOpacity
           onPress={() => router.replace("/client/create-service")}
-          style={{ backgroundColor: palette.card, padding: 14, borderRadius: 8,
-            borderWidth: 1, borderColor: palette.primary }}
+          style={{ backgroundColor: palette.card, padding: 14, borderRadius: 8, borderWidth: 1, borderColor: palette.primary }}
         >
           <Text style={{ color: palette.text }}>Crear solicitud</Text>
         </TouchableOpacity>
@@ -339,83 +328,70 @@ export default function ClientStatus() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{
-      backgroundColor: palette.background, paddingBottom: 36,
-    }}>
+    <ScrollView contentContainerStyle={{ backgroundColor: palette.background, paddingBottom: 36 }}>
 
       {/* ── MAPA ── */}
       {mapRegion && (
         <View style={{ height: 300, position: "relative" }}>
           <MapView
-            ref={mapRef}
-            provider={PROVIDER_GOOGLE}
-            style={{ flex: 1 }}
-            initialRegion={mapRegion}
+            ref={mapRef} provider={PROVIDER_GOOGLE}
+            style={{ flex: 1 }} initialRegion={mapRegion}
           >
-            {/* ── RUTA AZUL por calles reales ── */}
             {routeCoords.length > 1 && (
-              <Polyline
-                coordinates={routeCoords}
-                strokeColor="#2196F3"
-                strokeWidth={4}
-                geodesic={true}
-              />
+              <Polyline coordinates={routeCoords} strokeColor="#2196F3" strokeWidth={4} geodesic={true} />
             )}
 
-            {/* Pin profesional — azul, se mueve en tiempo real */}
+            {/* ── Marker profesional — ícono de máquina de cortar ── */}
             {professionalCoords && (
               <Marker
                 coordinate={professionalCoords}
                 title={acceptedBid?.name || "Profesional"}
                 description={
-                  request.status === "arrived"
-                    ? "Llegó a tu dirección"
-                    : gpsAge !== null ? `Actualizado hace ${gpsAge}s` : "En camino"
+                  request.status === "arrived" ? "Llegó a tu dirección"
+                  : gpsAge !== null ? `Actualizado hace ${gpsAge}s` : "En camino"
                 }
-                pinColor="#2196F3"
-              />
+                anchor={{ x: 0.5, y: 0.5 }}
+              >
+                <ClipperMarker size={44} color="#2196F3" />
+              </Marker>
             )}
 
-            {/* Pin lugar del servicio — dorado, fijo */}
+            {/* ── Marker destino — pin dorado ── */}
             {request.latitude && request.longitude && (
               <Marker
                 coordinate={{ latitude: request.latitude, longitude: request.longitude }}
                 title="Lugar del servicio"
                 description={request.address}
-                pinColor="#D4AF37"
-              />
+                anchor={{ x: 0.5, y: 1.0 }}
+              >
+                <DestinationMarker size={44} color="#D4AF37" />
+              </Marker>
             )}
           </MapView>
 
-          {/* Badge estado */}
+          {/* Badge estado GPS */}
           <View style={{
             position: "absolute", top: 10, left: 10,
             backgroundColor: "#000000bb", borderRadius: 8,
             paddingHorizontal: 10, paddingVertical: 6,
             borderWidth: 1,
             borderColor: request.status === "arrived"  ? "#9C27B0"
-                       : request.status === "on_route" ? "#2196F3"
-                       : "#555",
+                       : request.status === "on_route" ? "#2196F3" : "#555",
             flexDirection: "row", alignItems: "center", gap: 6,
           }}>
             <View style={{
               width: 8, height: 8, borderRadius: 4,
               backgroundColor: professionalCoords
-                ? (request.status === "arrived" ? "#9C27B0" : "#4caf50")
-                : "#555",
+                ? (request.status === "arrived" ? "#9C27B0" : "#4caf50") : "#555",
             }} />
             <Text style={{ color: professionalCoords ? "#fff" : "#888", fontSize: 11 }}>
-              {request.status === "arrived"
-                ? "📍 Profesional llegó"
-                : request.status === "on_route" && professionalCoords
-                ? `🚗 En camino${gpsAge !== null ? ` · ${gpsAge}s` : ""}`
-                : request.status === "accepted"
-                ? "Esperando que inicie el camino"
-                : "Sin señal GPS"}
+              {request.status === "arrived"   ? "📍 Profesional llegó"
+             : request.status === "on_route" && professionalCoords ? `✂ En camino${gpsAge !== null ? ` · ${gpsAge}s` : ""}`
+             : request.status === "accepted"  ? "Esperando que inicie el camino"
+             : "Sin señal GPS"}
             </Text>
           </View>
 
-          {/* Badge ruta */}
           {routeCoords.length > 1 && (
             <View style={{
               position: "absolute", top: 10, right: 10,
@@ -431,24 +407,17 @@ export default function ClientStatus() {
             </View>
           )}
 
-          {/* Botón ver ambos pines */}
           <TouchableOpacity
             onPress={() => {
               if (professionalCoords && request.latitude && request.longitude && mapRef.current) {
                 mapRef.current.fitToCoordinates(
-                  [
-                    { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
-                    { latitude: request.latitude!, longitude: request.longitude! },
-                  ],
+                  [{ latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
+                   { latitude: request.latitude!, longitude: request.longitude! }],
                   { edgePadding: { top: 60, right: 40, bottom: 40, left: 40 }, animated: true }
                 );
               }
             }}
-            style={{
-              position: "absolute", bottom: 12, right: 12,
-              backgroundColor: "#000000cc", borderRadius: 8,
-              padding: 10, borderWidth: 1, borderColor: "#444",
-            }}
+            style={{ position: "absolute", bottom: 12, right: 12, backgroundColor: "#000000cc", borderRadius: 8, padding: 10, borderWidth: 1, borderColor: "#444" }}
           >
             <Text style={{ color: "#fff", fontSize: 18 }}>⊕</Text>
           </TouchableOpacity>
@@ -456,9 +425,7 @@ export default function ClientStatus() {
       )}
 
       <View style={{ padding: 20, gap: 12 }}>
-        <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>
-          Estado de tu solicitud
-        </Text>
+        <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>Estado de tu solicitud</Text>
 
         {/* STATUS */}
         <View style={{
@@ -468,21 +435,15 @@ export default function ClientStatus() {
         }}>
           <Text style={{ fontSize: 24 }}>{statusInfo.emoji}</Text>
           <View>
-            <Text style={{ color: statusInfo.color, fontWeight: "900", fontSize: 16 }}>
-              {statusInfo.text}
-            </Text>
+            <Text style={{ color: statusInfo.color, fontWeight: "900", fontSize: 16 }}>{statusInfo.text}</Text>
             <Text style={{ color: "#aaa", fontSize: 12 }}>Solicitud #{request.id}</Text>
           </View>
         </View>
 
         {/* DETALLES */}
         <View style={{ backgroundColor: palette.card, padding: 14, borderRadius: 10, gap: 4 }}>
-          <Text style={{ color: palette.text }}>
-            Servicio: {request.service_type || "No definido"}
-          </Text>
-          <Text style={{ color: palette.text }}>
-            Dirección: {request.address || "No definida"}
-          </Text>
+          <Text style={{ color: palette.text }}>Servicio: {request.service_type || "No definido"}</Text>
+          <Text style={{ color: palette.text }}>Dirección: {request.address || "No definida"}</Text>
           <Text style={{ color: palette.primary, fontWeight: "700" }}>
             Precio: ${(request.price ?? 0).toLocaleString("es-CO")} COP
           </Text>
@@ -500,20 +461,14 @@ export default function ClientStatus() {
               Contraofertas ({pendingBids.length})
             </Text>
             {pendingBids.map((bid) => (
-              <View key={bid.id} style={{
-                borderWidth: 1, borderColor: palette.primary,
-                borderRadius: 10, padding: 14,
-              }}>
-                <Text style={{ color: palette.text }}>
-                  Profesional: {bid.name || `#${bid.barber_id}`}
-                </Text>
+              <View key={bid.id} style={{ borderWidth: 1, borderColor: palette.primary, borderRadius: 10, padding: 14 }}>
+                <Text style={{ color: palette.text }}>Profesional: {bid.name || `#${bid.barber_id}`}</Text>
                 <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 18 }}>
                   Oferta: ${bid.amount.toLocaleString("es-CO")}
                 </Text>
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
                   <TouchableOpacity
-                    onPress={() => acceptBid(bid.id)}
-                    disabled={actingBidId === bid.id}
+                    onPress={() => acceptBid(bid.id)} disabled={actingBidId === bid.id}
                     style={{ flex: 1, backgroundColor: "#0A7E07", padding: 10, borderRadius: 8 }}
                   >
                     <Text style={{ color: "#fff", textAlign: "center", fontWeight: "700" }}>
@@ -521,8 +476,7 @@ export default function ClientStatus() {
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => rejectBid(bid.id)}
-                    disabled={actingBidId === bid.id}
+                    onPress={() => rejectBid(bid.id)} disabled={actingBidId === bid.id}
                     style={{ flex: 1, backgroundColor: "#b30000", padding: 10, borderRadius: 8 }}
                   >
                     <Text style={{ color: "#fff", textAlign: "center" }}>Rechazar</Text>
@@ -535,19 +489,10 @@ export default function ClientStatus() {
 
         {/* PROFESIONAL ASIGNADO */}
         {acceptedBid && (
-          <View style={{
-            backgroundColor: "#0a2a0a", padding: 14, borderRadius: 10,
-            borderWidth: 1, borderColor: "#0A7E07",
-          }}>
-            <Text style={{ color: "#4caf50", fontWeight: "700", marginBottom: 4 }}>
-              Profesional asignado
-            </Text>
-            <Text style={{ color: palette.text }}>
-              {acceptedBid.name || `#${acceptedBid.barber_id}`}
-            </Text>
-            <Text style={{ color: palette.text }}>
-              Valor acordado: ${acceptedBid.amount.toLocaleString("es-CO")} COP
-            </Text>
+          <View style={{ backgroundColor: "#0a2a0a", padding: 14, borderRadius: 10, borderWidth: 1, borderColor: "#0A7E07" }}>
+            <Text style={{ color: "#4caf50", fontWeight: "700", marginBottom: 4 }}>Profesional asignado</Text>
+            <Text style={{ color: palette.text }}>{acceptedBid.name || `#${acceptedBid.barber_id}`}</Text>
+            <Text style={{ color: palette.text }}>Valor acordado: ${acceptedBid.amount.toLocaleString("es-CO")} COP</Text>
           </View>
         )}
 
@@ -555,67 +500,31 @@ export default function ClientStatus() {
         {serviceActive && (
           <View style={{ flexDirection: "row", gap: 10 }}>
             <TouchableOpacity
-              onPress={() => router.push({
-                pathname: "/chat/[serviceRequestId]",
-                params: {
-                  serviceRequestId: String(request.id),
-                  otherUserName:    acceptedBid?.name || "Profesional",
-                },
-              })}
-              style={{
-                flex: 1, backgroundColor: "#0d1b2e", padding: 16,
-                borderRadius: 12, borderWidth: 1, borderColor: "#4a90e2",
-                alignItems: "center",
-              }}
+              onPress={() => router.push({ pathname: "/chat/[serviceRequestId]", params: { serviceRequestId: String(request.id), otherUserName: acceptedBid?.name || "Profesional" } })}
+              style={{ flex: 1, backgroundColor: "#0d1b2e", padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "#4a90e2", alignItems: "center" }}
             >
               <Text style={{ color: "#4a90e2", fontWeight: "700" }}>💬 Chat</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => {
-                const phone = acceptedBid?.phone;
-                if (phone) Linking.openURL("tel:" + phone);
-                else Alert.alert("No disponible", "Usa el chat para comunicarte.");
-              }}
-              style={{
-                flex: 1, backgroundColor: "#0a2a0a", padding: 16,
-                borderRadius: 12, borderWidth: 1, borderColor: "#4caf50",
-                alignItems: "center",
-              }}
+              onPress={() => { const phone = acceptedBid?.phone; if (phone) Linking.openURL("tel:" + phone); else Alert.alert("No disponible", "Usa el chat."); }}
+              style={{ flex: 1, backgroundColor: "#0a2a0a", padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "#4caf50", alignItems: "center" }}
             >
               <Text style={{ color: "#4caf50", fontWeight: "700" }}>📞 Llamar</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        <TouchableOpacity
-          onPress={loadStatus}
-          style={{
-            backgroundColor: palette.primary, padding: 12,
-            borderRadius: 8, alignItems: "center",
-          }}
-        >
+        <TouchableOpacity onPress={loadStatus} style={{ backgroundColor: palette.primary, padding: 12, borderRadius: 8, alignItems: "center" }}>
           <Text style={{ color: "#000", fontWeight: "700" }}>Actualizar estado</Text>
         </TouchableOpacity>
 
         {["open", "accepted", "on_route", "arrived"].includes(request.status || "") && (
-          <TouchableOpacity
-            onPress={cancelService}
-            style={{
-              borderWidth: 1, borderColor: "#dd0000",
-              padding: 12, borderRadius: 8, alignItems: "center",
-            }}
-          >
+          <TouchableOpacity onPress={cancelService} style={{ borderWidth: 1, borderColor: "#dd0000", padding: 12, borderRadius: 8, alignItems: "center" }}>
             <Text style={{ color: "#dd0000" }}>Cancelar servicio</Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
-          onPress={() => router.replace("/client/home")}
-          style={{
-            borderWidth: 1, borderColor: "#555",
-            padding: 12, borderRadius: 8, alignItems: "center",
-          }}
-        >
+        <TouchableOpacity onPress={() => router.replace("/client/home")} style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 8, alignItems: "center" }}>
           <Text style={{ color: "#aaa" }}>Volver al inicio</Text>
         </TouchableOpacity>
       </View>
