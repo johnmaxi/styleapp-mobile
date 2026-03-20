@@ -3,46 +3,55 @@ import { SERVICE_CATALOG, formatPrice, roleToProType } from "@/constants/service
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
+  ActivityIndicator, Alert, ScrollView,
+  Text, TouchableOpacity, View,
 } from "react-native";
 import api from "../../api";
 import { useAuth } from "../../context/AuthContext";
 import { getPalette } from "../../utils/palette";
+import { playSound } from "@/utils/sounds";
 
 type RequestItem = {
   id: number;
-  service_type?: string;
+  service_type?:     string;
   professional_type?: string;
-  price?: number;
-  address?: string;
-  status?: string;
-  latitude?: number;
-  longitude?: number;
+  price?:            number;
+  address?:          string;
+  status?:           string;
+  latitude?:         number;
+  longitude?:        number;
+  payment_method?:   string;
 };
 
 type BidStatus = "none" | "pending" | "accepted" | "rejected";
-type MyBidMap = Record<number, { bidId: number; status: BidStatus; amount: number }>;
+type MyBidMap  = Record<number, { bidId: number; status: BidStatus; amount: number }>;
+
+const PAYMENT_LABELS: Record<string, string> = {
+  efectivo: "💵 Efectivo",
+  nequi:    "📱 Nequi",
+  pse:      "🏦 PSE — Precio fijo",
+  tarjeta:  "💳 Tarjeta — Precio fijo",
+};
+
+// Métodos con precio fijo — no permiten contraoferta
+const FIXED_PRICE_METHODS = ["pse", "tarjeta"];
 
 export default function Jobs() {
-  const router = useRouter();
+  const router   = useRouter();
   const { user } = useAuth();
-  const palette = getPalette(user?.gender);
+  const palette  = getPalette(user?.gender);
 
-  const [requests, setRequests]         = useState<RequestItem[]>([]);
-  const [myBidMap, setMyBidMap]         = useState<MyBidMap>({});
-  const [isActive, setIsActive]         = useState(true);
-  const [loading, setLoading]           = useState(true);
+  const [requests,        setRequests]        = useState<RequestItem[]>([]);
+  const [myBidMap,        setMyBidMap]        = useState<MyBidMap>({});
+  const [isActive,        setIsActive]        = useState(true);
+  const [loading,         setLoading]         = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
 
   const notifiedRejected = useRef<Set<number>>(new Set());
   const notifiedAccepted = useRef<Set<number>>(new Set());
+  const prevCountRef     = useRef<number>(-1);
 
-  const proType        = user?.role ? roleToProType(user.role) : null;
+  const proType         = user?.role ? roleToProType(user.role) : null;
   const allowedServices = proType
     ? SERVICE_CATALOG[proType].map((s) => s.label.toLowerCase())
     : [];
@@ -51,10 +60,10 @@ export default function Jobs() {
     if (!proType) return [];
     return items.filter((item) => {
       if (item.professional_type) return item.professional_type === proType;
-      if (!item.service_type) return false;
+      if (!item.service_type)     return false;
       const types = item.service_type.toLowerCase().split(",").map((s) => s.trim());
       return types.some((t) =>
-        allowedServices.some((allowed) => t.includes(allowed) || allowed.includes(t))
+        allowedServices.some((a) => t.includes(a) || a.includes(t))
       );
     });
   };
@@ -83,7 +92,6 @@ export default function Jobs() {
 
   const loadOpenRequests = useCallback(async () => {
     try {
-      // Verificar si está activo desde el backend
       try {
         const statusRes = await api.get("/service-requests/active-status");
         if (statusRes.data?.is_active === false) {
@@ -106,7 +114,7 @@ export default function Jobs() {
       let list: RequestItem[] = [];
       for (const endpoint of endpoints) {
         try {
-          const res  = await api.get(endpoint);
+          const res     = await api.get(endpoint);
           const payload = res.data;
           const rows: RequestItem[] = Array.isArray(payload)
             ? payload
@@ -121,23 +129,27 @@ export default function Jobs() {
 
       const filtered = filterByProType(list);
 
-      // Notificaciones de cambio de estado
+      // Sonido si llegó solicitud nueva
+      if (prevCountRef.current >= 0 && filtered.length > prevCountRef.current) {
+        playSound("new_request");
+      }
+      prevCountRef.current = filtered.length;
+
+      // Notificaciones de cambio de estado de bids
       Object.entries(bidMap).forEach(([reqId, bid]) => {
-        const reqIdNum   = Number(reqId);
-        const req        = filtered.find((r) => r.id === reqIdNum) || list.find((r) => r.id === reqIdNum);
+        const reqIdNum     = Number(reqId);
+        const req          = filtered.find((r) => r.id === reqIdNum) || list.find((r) => r.id === reqIdNum);
         const serviceLabel = req?.service_type || `#${reqId}`;
 
         if (bid.status === "rejected" && !notifiedRejected.current.has(bid.bidId)) {
           notifiedRejected.current.add(bid.bidId);
-          Alert.alert(
-            "Oferta rechazada",
-            `El cliente rechazo tu oferta para "${serviceLabel}".`
-          );
+          Alert.alert("Oferta rechazada", `El cliente rechazo tu oferta para "${serviceLabel}".`);
         }
         if (bid.status === "accepted" && !notifiedAccepted.current.has(bid.bidId)) {
           notifiedAccepted.current.add(bid.bidId);
+          playSound("service_accepted");
           Alert.alert(
-            "Oferta aceptada!",
+            "¡Oferta aceptada!",
             `El cliente acepto tu oferta para "${serviceLabel}". Ve al servicio activo.`,
             [{ text: "Ver servicio", onPress: () => router.push("/barber/home") }]
           );
@@ -159,32 +171,28 @@ export default function Jobs() {
     return () => clearInterval(timer);
   }, [loadOpenRequests]);
 
-  // FIX PRINCIPAL: usar endpoint dedicado que asigna assigned_barber_id correctamente
   const handleAccept = async (item: RequestItem) => {
     try {
       setActionLoadingId(item.id);
-
-      // POST /bids/accept-direct — crea bid Y asigna assigned_barber_id en una transaccion
       const res = await api.post("/bids/accept-direct", {
         service_request_id: item.id,
       });
-
       if (res.data?.ok) {
-        Alert.alert("Aceptado!", "Servicio asignado. Dirigete al cliente.");
+        playSound("service_accepted");
+        Alert.alert("¡Aceptado!", "Servicio asignado. Dirígete al cliente.");
         router.push({
           pathname: "/barber/active",
           params: {
             id:           String(item.id),
             service_type: item.service_type || "",
-            address:      item.address || "",
+            address:      item.address      || "",
             price:        String(item.price || 0),
             status:       "accepted",
           },
         });
       }
     } catch (err: any) {
-      const msg = err?.response?.data?.error || "No se pudo aceptar el servicio";
-      Alert.alert("Error", msg);
+      Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar el servicio");
     } finally {
       setActionLoadingId(null);
     }
@@ -196,16 +204,17 @@ export default function Jobs() {
       params: {
         requestId:    String(item.id),
         currentPrice: String(item.price ?? 0),
+        serviceType:  item.service_type  || "",
+        address:      item.address       || "",
       },
     });
   };
 
-  // Badge de estado de la bid
   const BID_BADGE: Record<BidStatus, { label: string; bg: string; color: string }> = {
-    none:     { label: "",                      bg: "transparent",  color: "transparent" },
-    pending:  { label: "Tu oferta: pendiente",  bg: "#1a1a00",      color: "#D4AF37"     },
-    accepted: { label: "Tu oferta: aceptada",   bg: "#0a2a0a",      color: "#4caf50"     },
-    rejected: { label: "Tu oferta: rechazada",  bg: "#2a0a0a",      color: "#dd0000"     },
+    none:     { label: "",                      bg: "transparent", color: "transparent" },
+    pending:  { label: "Tu oferta: pendiente",  bg: "#1a1a00",     color: "#D4AF37"    },
+    accepted: { label: "Tu oferta: aceptada",   bg: "#0a2a0a",     color: "#4caf50"    },
+    rejected: { label: "Tu oferta: rechazada",  bg: "#2a0a0a",     color: "#dd0000"    },
   };
 
   if (loading) {
@@ -221,7 +230,7 @@ export default function Jobs() {
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center",
         backgroundColor: palette.background, padding: 24 }}>
         <Text style={{ color: "#888", textAlign: "center", fontSize: 16, marginBottom: 16 }}>
-          Estas inactivo. Activa tu disponibilidad desde el inicio para ver solicitudes.
+          Estás inactivo. Activa tu disponibilidad desde el inicio para ver solicitudes.
         </Text>
         <TouchableOpacity
           onPress={() => router.replace("/barber/home")}
@@ -250,7 +259,7 @@ export default function Jobs() {
             No hay solicitudes disponibles ahora.
           </Text>
           <Text style={{ color: "#555", fontSize: 12, marginTop: 6, textAlign: "center" }}>
-            Se actualizan cada 6 segundos automaticamente.
+            Se actualizan cada 6 segundos automáticamente.
           </Text>
         </View>
       ) : (
@@ -261,6 +270,7 @@ export default function Jobs() {
           const isRejected  = bidStatus === "rejected";
           const isPending   = bidStatus === "pending";
           const badge       = BID_BADGE[bidStatus];
+          const isFixedPrice = FIXED_PRICE_METHODS.includes(item.payment_method || "");
 
           return (
             <View key={item.id} style={{
@@ -270,16 +280,24 @@ export default function Jobs() {
                          : bidStatus === "pending"  ? "#D4AF37"
                          : "#333",
             }}>
-              <Text style={{ color: palette.primary, fontWeight: "700",
-                fontSize: 15, marginBottom: 4 }}>
+              {/* Servicio y dirección */}
+              <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 15, marginBottom: 4 }}>
                 {item.service_type || "Servicio"}
               </Text>
               <Text style={{ color: "#aaa", fontSize: 13, marginBottom: 4 }}>
-                {item.address || "Sin direccion"}
+                📍 {item.address || "Sin dirección"}
               </Text>
-              <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 6 }}>
-                {item.price ? formatPrice(item.price) : "Sin precio"}
+              <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 4 }}>
+                💰 {item.price ? formatPrice(item.price) : "Sin precio"}
               </Text>
+
+              {/* Método de pago */}
+              {item.payment_method && (
+                <Text style={{ color: isFixedPrice ? "#D4AF37" : "#888", fontSize: 12, marginBottom: 6 }}>
+                  {PAYMENT_LABELS[item.payment_method] || item.payment_method}
+                  {isFixedPrice ? " — sin contraofertas" : ""}
+                </Text>
+              )}
 
               {/* Badge estado bid */}
               {bidStatus !== "none" && (
@@ -295,7 +313,7 @@ export default function Jobs() {
                 </View>
               )}
 
-              {/* Botones — solo si no hay bid activa o si fue rechazada */}
+              {/* Botones */}
               {(!alreadySent || isRejected) && (
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
                   <TouchableOpacity
@@ -310,18 +328,22 @@ export default function Jobs() {
                       {actionLoadingId === item.id ? "..." : "Aceptar precio"}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => handleCounterOffer(item)}
-                    style={{
-                      flex: 1, backgroundColor: "transparent",
-                      borderWidth: 1, borderColor: palette.primary,
-                      paddingVertical: 10, borderRadius: 8, alignItems: "center",
-                    }}
-                  >
-                    <Text style={{ color: palette.text }}>
-                      {isRejected ? "Nueva oferta" : "Contraoferta"}
-                    </Text>
-                  </TouchableOpacity>
+
+                  {/* Solo mostrar Contraoferta si NO es precio fijo */}
+                  {!isFixedPrice && (
+                    <TouchableOpacity
+                      onPress={() => handleCounterOffer(item)}
+                      style={{
+                        flex: 1, backgroundColor: "transparent",
+                        borderWidth: 1, borderColor: palette.primary,
+                        paddingVertical: 10, borderRadius: 8, alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ color: palette.text }}>
+                        {isRejected ? "Nueva oferta" : "Contraoferta"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 

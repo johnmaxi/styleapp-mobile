@@ -22,14 +22,36 @@
         "googleMaps": {
           "apiKey": "AIzaSyDjGBwlnaJ92B_HqKwHNSV0DdUdGZo51wE"
         }
-      }
+      },
+      "permissions": [
+        "NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/icon.png"
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0D2137",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "StyleApp necesita tu ubicación para conectarte con clientes cercanos."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
