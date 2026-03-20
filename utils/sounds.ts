@@ -1,163 +1,133 @@
 // utils/sounds.ts
-// Sistema de sonidos para StyleApp usando expo-av
-// Instalación: expo install expo-av
+// Sonidos usando expo-av con archivos locales
+// INSTALACIÓN: npx expo install expo-av
+// ARCHIVOS: crea la carpeta assets/sounds/ y descarga los mp3 de mixkit.co
 
 import { Audio } from "expo-av";
+import { Platform, Vibration } from "react-native";
+import { useEffect, useRef } from "react";
 
-// ── Tipos de sonidos ──────────────────────────────────────────────────────
 export type SoundType =
-  | "new_request"       // Nueva solicitud disponible (barbero)
-  | "service_accepted"  // Servicio aceptado
-  | "counteroffer"      // Nueva contraoferta recibida
-  | "on_route"          // Profesional en camino
-  | "arrived"           // Profesional llegó
-  | "service_complete"  // Servicio finalizado
-  | "payment_received"  // Pago recibido
-  | "notification";     // Notificación genérica
+  | "new_request"
+  | "service_accepted"
+  | "counteroffer"
+  | "on_route"
+  | "arrived"
+  | "service_complete"
+  | "payment_received"
+  | "notification";
 
-// Cache de sonidos cargados
-const soundCache: Partial<Record<SoundType, Audio.Sound>> = {};
-
-// ── Frecuencias para generar tonos (sin archivos externos) ────────────────
-// Usamos la API de Audio para generar sonidos del sistema
-// Los URIs apuntan a sonidos incluidos en el APK de Android
-
-const SOUND_CONFIG: Record<SoundType, {
-  frequency?: number;
-  pattern: number[];   // [ON ms, OFF ms, ON ms, ...]
-  description: string;
-}> = {
-  new_request: {
-    pattern: [200, 100, 200, 100, 400],
-    description: "Nueva solicitud — 3 beeps ascendentes",
-  },
-  service_accepted: {
-    pattern: [500],
-    description: "Aceptado — tono largo positivo",
-  },
-  counteroffer: {
-    pattern: [150, 80, 150],
-    description: "Contraoferta — 2 beeps cortos",
-  },
-  on_route: {
-    pattern: [300, 100, 300],
-    description: "En camino — 2 tonos medios",
-  },
-  arrived: {
-    pattern: [200, 50, 200, 50, 600],
-    description: "Llegada — trino corto + tono largo",
-  },
-  service_complete: {
-    pattern: [300, 100, 300, 100, 300, 100, 600],
-    description: "Completado — fanfarria corta",
-  },
-  payment_received: {
-    pattern: [100, 50, 100, 50, 400],
-    description: "Pago — tono positivo",
-  },
-  notification: {
-    pattern: [200],
-    description: "Notificación genérica",
-  },
+// ── Mapeo de archivos locales ─────────────────────────────────────────────
+// Descarga estos archivos de https://mixkit.co/free-sound-effects/
+// y ponlos en assets/sounds/
+const SOUND_FILES: Record<SoundType, any> = {
+  new_request:      require("../assets/sounds/new-request.mp3"),
+  service_accepted: require("../assets/sounds/accepted.mp3"),
+  counteroffer:     require("../assets/sounds/counteroffer.mp3"),
+  on_route:         require("../assets/sounds/on-route.mp3"),
+  arrived:          require("../assets/sounds/arrived.mp3"),
+  service_complete: require("../assets/sounds/complete.mp3"),
+  payment_received: require("../assets/sounds/payment.mp3"),
+  notification:     require("../assets/sounds/notification.mp3"),
 };
 
-// ── Inicializar modo de audio ─────────────────────────────────────────────
+// ── Vibración por tipo ────────────────────────────────────────────────────
+const VIBRATION_PATTERNS: Record<SoundType, number[]> = {
+  new_request:      [0, 200, 100, 200, 100, 400],
+  service_accepted: [0, 500],
+  counteroffer:     [0, 150, 80, 150],
+  on_route:         [0, 300, 100, 300],
+  arrived:          [0, 200, 50, 200, 50, 600],
+  service_complete: [0, 300, 100, 300, 100, 600],
+  payment_received: [0, 100, 50, 100, 50, 400],
+  notification:     [0, 200],
+};
+
 let audioInitialized = false;
+const soundCache: Partial<Record<SoundType, Audio.Sound>> = {};
+
 async function initAudio() {
   if (audioInitialized) return;
   try {
     await Audio.setAudioModeAsync({
-      playsInSilentModeIOS:     true,
-      staysActiveInBackground:  false,
-      shouldDuckAndroid:        true,
+      playsInSilentModeIOS:    true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid:       true,
     });
     audioInitialized = true;
-  } catch (e) {
-    console.warn("Audio init error:", e);
-  }
+  } catch {}
 }
 
-// ── Usar vibración como fallback ──────────────────────────────────────────
-import { Vibration, Platform } from "react-native";
-
-function vibratePattern(pattern: number[]) {
-  if (Platform.OS === "android") {
-    // Android: patrón de vibración [delay, vibrate, pause, vibrate, ...]
-    Vibration.vibrate(pattern);
-  } else {
-    // iOS: vibración simple
-    Vibration.vibrate();
-  }
-}
-
-// ── Reproducir sonido ─────────────────────────────────────────────────────
 export async function playSound(type: SoundType): Promise<void> {
   try {
     await initAudio();
-    const config = SOUND_CONFIG[type];
 
-    // Vibrar con el patrón correspondiente
-    vibratePattern(config.pattern);
+    // Vibrar
+    if (Platform.OS === "android") {
+      Vibration.vibrate(VIBRATION_PATTERNS[type]);
+    } else {
+      Vibration.vibrate();
+    }
 
-    // Si hay archivo de sonido cargado, reproducirlo
+    // Reproducir desde cache si existe
     if (soundCache[type]) {
       try {
-        await soundCache[type]!.replayAsync();
+        await soundCache[type]!.setPositionAsync(0);
+        await soundCache[type]!.playAsync();
         return;
       } catch {
-        // Si falla, continuar sin sonido (vibración ya se activó)
+        // Si falla el cache, recrear
+        try { await soundCache[type]!.unloadAsync(); } catch {}
+        delete soundCache[type];
       }
     }
 
-    // Intentar reproducir con archivo local si existe
-    const soundFiles: Partial<Record<SoundType, any>> = {
-      // Agrega aquí tus archivos de sonido locales:
-      // new_request:      require("../assets/sounds/new_request.mp3"),
-      // service_accepted: require("../assets/sounds/accepted.mp3"),
-      // counteroffer:     require("../assets/sounds/counteroffer.mp3"),
-      // on_route:         require("../assets/sounds/on_route.mp3"),
-      // arrived:          require("../assets/sounds/arrived.mp3"),
-      // service_complete: require("../assets/sounds/complete.mp3"),
-    };
+    // Cargar y reproducir
+    const { sound } = await Audio.Sound.createAsync(
+      SOUND_FILES[type],
+      { shouldPlay: true, volume: 1.0 }
+    );
+    soundCache[type] = sound;
 
-    if (soundFiles[type]) {
-      const { sound } = await Audio.Sound.createAsync(soundFiles[type]);
-      soundCache[type] = sound;
-      await sound.playAsync();
-    }
+    // Limpiar al terminar
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.isLoaded && status.didJustFinish) {
+        // No descargar — mantener en cache para próxima vez
+      }
+    });
   } catch (err) {
-    // Nunca crashear por un sonido fallido
-    console.warn(`Sound error [${type}]:`, err);
+    console.warn(`Sound [${type}] error:`, err);
+    // Vibrar igual aunque falle el audio
+    Vibration.vibrate(VIBRATION_PATTERNS[type]);
   }
 }
 
-// ── Precargar todos los sonidos al iniciar la app ─────────────────────────
 export async function preloadSounds(): Promise<void> {
   await initAudio();
-  // Cuando tengas archivos de sonido, precárgalos aquí
-  console.log("Sounds ready (vibration mode)");
+  const types: SoundType[] = ["new_request", "service_accepted", "counteroffer", "notification"];
+  for (const type of types) {
+    try {
+      if (!soundCache[type]) {
+        const { sound } = await Audio.Sound.createAsync(SOUND_FILES[type]);
+        soundCache[type] = sound;
+      }
+    } catch {}
+  }
 }
 
-// ── Limpiar sonidos al desmontar ──────────────────────────────────────────
 export async function unloadSounds(): Promise<void> {
   for (const sound of Object.values(soundCache)) {
     try { await sound?.unloadAsync(); } catch {}
   }
 }
 
-// ── Hooks para usar en componentes ───────────────────────────────────────
-import { useEffect } from "react";
-
-export function useSoundOnMount(type: SoundType) {
+// Hook para sonido en cambio de valor
+export function useSoundOnChange(type: SoundType, value: any, condition = true) {
+  const prevRef = useRef<any>(undefined);
   useEffect(() => {
-    playSound(type);
-  }, []);
-}
-
-export function useSoundOnChange(type: SoundType, trigger: any, condition = true) {
-  useEffect(() => {
-    if (condition && trigger) {
+    if (condition && prevRef.current !== undefined && prevRef.current !== value) {
       playSound(type);
     }
-  }, [trigger]);
+    prevRef.current = value;
+  }, [value, condition]);
 }
