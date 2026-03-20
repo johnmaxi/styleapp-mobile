@@ -1,15 +1,13 @@
 // hooks/usePushNotifications.ts
-// Registra el token push y maneja notificaciones entrantes
-
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as Location from "expo-location";
 import { useEffect, useRef } from "react";
-import { Platform } from "react-native";
+import { Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import api from "../api";
 
-// Configurar cómo se muestran las notificaciones cuando la app está abierta
+// Mostrar notificaciones cuando la app está abierta
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -19,17 +17,20 @@ Notifications.setNotificationHandler({
 });
 
 export function usePushNotifications(userId?: number, role?: string) {
-  const router              = useRouter();
+  const router               = useRouter();
   const notificationListener = useRef<any>();
   const responseListener     = useRef<any>();
 
-  // ── Registrar token push ────────────────────────────────────────────────
+  // ── Registrar token push ──────────────────────────────────────────────
   useEffect(() => {
     if (!userId) return;
 
-    const registerToken = async () => {
+    const register = async () => {
       try {
-        if (!Device.isDevice) return; // no funciona en simulador
+        if (!Device.isDevice) {
+          console.log("Push: solo funciona en dispositivo físico");
+          return;
+        }
 
         const { status: existing } = await Notifications.getPermissionsAsync();
         let finalStatus = existing;
@@ -40,65 +41,49 @@ export function usePushNotifications(userId?: number, role?: string) {
         }
 
         if (finalStatus !== "granted") {
-          console.log("Permiso de notificaciones denegado");
+          console.log("Push: permiso denegado");
           return;
         }
 
-        // Obtener token de Expo
-        const tokenData = await Notifications.getExpoPushTokenAsync({
-          projectId: "927dfa9c-986b-4be2-9145-274583151d55", // tu projectId
-        });
-        const token = tokenData.data;
-
-        // Canal de Android
+        // Canal Android con sonido
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync("styleapp-notifications", {
-            name:       "StyleApp",
-            importance: Notifications.AndroidImportance.MAX,
+            name:             "StyleApp",
+            importance:       Notifications.AndroidImportance.MAX,
             vibrationPattern: [0, 250, 250, 250],
-            lightColor: "#D4AF37",
-            sound:      "default",
+            lightColor:       "#D4AF37",
+            sound:            "default",
+            enableVibrate:    true,
           });
         }
 
-        // Guardar token en el backend
-        await api.post("/notifications/push-token", { token });
-        console.log("Push token registrado:", token.substring(0, 30) + "...");
+        const tokenData = await Notifications.getExpoPushTokenAsync({
+          projectId: "927dfa9c-986b-4be2-9145-274583151d55",
+        });
+
+        await api.post("/notifications/push-token", { token: tokenData.data });
+        console.log("Push token registrado OK");
 
       } catch (err: any) {
-        console.warn("Error registrando push token:", err.message);
+        console.warn("Push token error:", err.message);
       }
     };
 
-    registerToken();
+    register();
   }, [userId]);
 
-  // ── Actualizar ubicación del profesional periódicamente ─────────────────
+  // ── Actualizar ubicación del profesional ──────────────────────────────
   useEffect(() => {
-    const PROFESSIONAL_ROLES = ["barber", "estilista", "quiropodologo"];
-    if (!userId || !role || !PROFESSIONAL_ROLES.includes(role)) return;
+    const PROF_ROLES = ["barber", "estilista", "quiropodologo"];
+    if (!userId || !role || !PROF_ROLES.includes(role)) return;
 
-    let interval: any;
+    let interval: ReturnType<typeof setInterval>;
 
-    const startLocationUpdates = async () => {
+    const updateLocation = async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status } = await Location.getForegroundPermissionsAsync();
         if (status !== "granted") return;
 
-        // Actualizar ubicación cada 3 minutos cuando la app está abierta
-        interval = setInterval(async () => {
-          try {
-            const loc = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            await api.post("/notifications/update-location", {
-              latitude:  loc.coords.latitude,
-              longitude: loc.coords.longitude,
-            });
-          } catch {}
-        }, 3 * 60 * 1000); // cada 3 minutos
-
-        // Actualizar inmediatamente al abrir
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
@@ -109,27 +94,86 @@ export function usePushNotifications(userId?: number, role?: string) {
       } catch {}
     };
 
-    startLocationUpdates();
-    return () => { if (interval) clearInterval(interval); };
+    // Actualizar inmediatamente y luego cada 3 minutos
+    updateLocation();
+    interval = setInterval(updateLocation, 3 * 60 * 1000);
+
+    return () => clearInterval(interval);
   }, [userId, role]);
 
-  // ── Manejar notificaciones recibidas ─────────────────────────────────────
+  // ── Manejar toque en notificación ─────────────────────────────────────
   useEffect(() => {
-    // Notificación recibida con app abierta
+    // Notificación recibida con app abierta — mostrar Alert con acciones
     notificationListener.current = Notifications.addNotificationReceivedListener(
       (notification) => {
-        const data = notification.request.content.data;
-        console.log("Notificación recibida:", data?.type);
+        const data = notification.request.content.data as any;
+
+        if (data?.type === "new_service") {
+          // Mostrar Alert con opciones: Aceptar, Contraoferta, Omitir
+          Alert.alert(
+            `✂️ ${data.service_type || "Nuevo servicio"}`,
+            `📍 ${data.address || ""}\n💰 $${Number(data.price || 0).toLocaleString("es-CO")} COP\n🚗 ${data.distance || ""} · ~${data.eta || ""}`,
+            [
+              {
+                text: "✅ Aceptar",
+                onPress: async () => {
+                  try {
+                    const res = await api.post("/bids/accept-direct", {
+                      service_request_id: Number(data.service_id),
+                    });
+                    if (res.data?.ok) {
+                      router.push({
+                        pathname: "/barber/active",
+                        params: {
+                          id:           String(data.service_id),
+                          service_type: data.service_type || "",
+                          address:      data.address      || "",
+                          price:        String(data.price || 0),
+                          status:       "accepted",
+                        },
+                      });
+                    }
+                  } catch (err: any) {
+                    Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar");
+                  }
+                },
+              },
+              {
+                text: "💬 Contraoferta",
+                onPress: () => {
+                  router.push({
+                    pathname: "/barber/offer",
+                    params: {
+                      requestId:    String(data.service_id),
+                      currentPrice: String(data.price || 0),
+                      serviceType:  data.service_type || "",
+                      address:      data.address      || "",
+                    },
+                  });
+                },
+              },
+              {
+                text: "Omitir",
+                style: "cancel",
+              },
+            ],
+            { cancelable: true }
+          );
+        }
       }
     );
 
-    // Usuario tocó la notificación
+    // Usuario tocó la notificación desde fuera de la app
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const data = response.notification.request.content.data as any;
+        const data       = response.notification.request.content.data as any;
+        const actionId   = response.actionIdentifier;
+
         if (data?.type === "new_service") {
-          // Navegar a la lista de solicitudes
-          router.push("/barber/jobs");
+          if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+            // Tocó la notificación → ir a jobs
+            router.push("/barber/jobs");
+          }
         }
       }
     );

@@ -2,6 +2,7 @@
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import {
@@ -39,28 +40,28 @@ export default function BarberHome() {
   const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
 
-  const [myBids, setMyBids]               = useState<MyBid[]>([]);
+  const [myBids,        setMyBids]        = useState<MyBid[]>([]);
   const [activeService, setActiveService] = useState<ActiveService | null>(null);
-  const [loading, setLoading]             = useState(true);
-  const [isActive, setIsActive]           = useState(true);
+  const [loading,       setLoading]       = useState(true);
+  const [isActive,      setIsActive]      = useState(true);
   const [togglingActive, setTogglingActive] = useState(false);
 
-  // Para detectar nuevas solicitudes y disparar sonido
   const prevOpenCountRef = useRef<number>(-1);
   const prevBidsCountRef = useRef<number>(-1);
 
   const displayName = user?.name?.split(" ")[0] || "Profesional";
   const roleLabel   = ROLE_LABELS[user?.role || ""] || "Profesional";
 
+  // ── Registrar push token y actualizar ubicación ───────────────────────
+  usePushNotifications(user?.id, user?.role);
+
   const loadData = useCallback(async () => {
     try {
-      // Estado activo/inactivo
       try {
         const statusRes = await api.get("/service-requests/active-status");
         setIsActive(statusRes.data?.is_active ?? true);
       } catch {}
 
-      // Servicio asignado activo
       try {
         const assignedRes = await api.get("/service-requests/assigned/me");
         const assigned: ActiveService[] = Array.isArray(assignedRes.data)
@@ -73,7 +74,6 @@ export default function BarberHome() {
         setActiveService(active || null);
       } catch {}
 
-      // Bids pendientes — sonido si llega una nueva aceptación
       try {
         const bidsRes = await api.get("/bids/my-bids");
         const bids: MyBid[] = Array.isArray(bidsRes.data)
@@ -83,14 +83,12 @@ export default function BarberHome() {
         const pending = bids.filter((b) => b.status === "pending");
         setMyBids(pending);
 
-        // Sonido si se aceptó una bid (bajó el count de pending)
         if (prevBidsCountRef.current > 0 && pending.length < prevBidsCountRef.current) {
           playSound("service_accepted");
         }
         prevBidsCountRef.current = pending.length;
       } catch {}
 
-      // Solicitudes abiertas — sonido si llega nueva solicitud
       try {
         const openRes = await api.get("/service-requests/open");
         const open = Array.isArray(openRes.data)
@@ -232,9 +230,7 @@ export default function BarberHome() {
             {activeService.service_type || "Servicio"} — Solicitud #{activeService.id}
           </Text>
           {activeService.address && (
-            <Text style={{ color: "#aaa", marginTop: 2, fontSize: 12 }}>
-              {activeService.address}
-            </Text>
+            <Text style={{ color: "#aaa", marginTop: 2, fontSize: 12 }}>{activeService.address}</Text>
           )}
           {activeService.price != null && (
             <Text style={{ color: "#4caf50", marginTop: 4, fontWeight: "700" }}>
@@ -272,7 +268,6 @@ export default function BarberHome() {
         </View>
       )}
 
-      {/* Sin actividad */}
       {!activeService && myBids.length === 0 && (
         <View style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10, alignItems: "center" }}>
           <Text style={{ color: "#888", textAlign: "center" }}>
@@ -283,7 +278,6 @@ export default function BarberHome() {
         </View>
       )}
 
-      {/* ── NAVEGACION ── */}
       {isActive && (
         <TouchableOpacity
           onPress={() => router.push("/barber/jobs")}
@@ -292,9 +286,7 @@ export default function BarberHome() {
             borderWidth: 1, borderColor: palette.primary, alignItems: "center",
           }}
         >
-          <Text style={{ color: palette.text, fontWeight: "700" }}>
-            Ver solicitudes disponibles
-          </Text>
+          <Text style={{ color: palette.text, fontWeight: "700" }}>Ver solicitudes disponibles</Text>
         </TouchableOpacity>
       )}
 
