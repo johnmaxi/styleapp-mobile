@@ -12,6 +12,7 @@ import {
   Text, TouchableOpacity, View
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import { ClipperMarker, DestinationMarker } from "@/utils/mapMarkers";
 
 type ServiceRequest = {
   id: number;
@@ -379,10 +380,16 @@ export default function BarberActive() {
             {routeCoords.length > 1 && (
               <Polyline coordinates={routeCoords} strokeColor="#2196F3" strokeWidth={4} geodesic={true} />
             )}
-            {myCoords && <Marker coordinate={myCoords} title="Tu ubicación" pinColor="#2196F3" />}
+            {myCoords && (
+              <Marker coordinate={myCoords} title="Tu ubicación" anchor={{ x: 0.5, y: 0.5 }}>
+                <ClipperMarker size={44} color="#2196F3" />
+              </Marker>
+            )}
             {clientCoords && (
               <Marker coordinate={clientCoords} title={clientInfo?.name || "Destino"}
-                description={request?.address} pinColor="#D4AF37" />
+                description={request?.address} anchor={{ x: 0.5, y: 1.0 }}>
+                <DestinationMarker size={44} color="#D4AF37" />
+              </Marker>
             )}
           </MapView>
         ) : (
