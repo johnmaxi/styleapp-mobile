@@ -5,17 +5,38 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator, Alert, Image, Linking,
-  Modal, ScrollView, Text, TextInput,
+  ActivityIndicator, Alert, Image, Modal,
+  ScrollView, Text, TextInput,
   TouchableOpacity, View,
 } from "react-native";
 
-// ── Tipos ─────────────────────────────────────────────────────────────────
-type BarberCommission = {
-  barber_id: number;
-  barber_name?: string;
+type Commission = {
+  id:                number;
+  service_id:        number;
+  total_service:     number;
+  commission_amt:    number;
+  professional_amt:  number;
+  payment_method:    string;
+  payment_status:    string;
+  notes?:            string;
+  created_at:        string;
+  professional_name?: string;
+  professional_role?: string;
+};
+
+type ByProfRow = {
+  barber_id:        number;
+  barber_name?:     string;
   completed_total?: number;
   commission_total?: number;
+  revenue_total?:   number;
+};
+
+type Totals = {
+  total_transacciones: number;
+  total_servicios:     number;
+  saldo_app:           number;
+  total_profesionales: number;
 };
 
 type Professional = {
@@ -41,25 +62,61 @@ const ROLE_LABELS: Record<string, string> = {
   quiropodologo: "Quiropodologo",
 };
 
+const PAYMENT_LABELS: Record<string, string> = {
+  efectivo: "💵 Efectivo",
+  nequi:    "📱 Nequi",
+  pse:      "🏦 PSE",
+  tarjeta:  "💳 Tarjeta",
+};
+
 type Tab = "registros" | "comisiones";
+
+// ── Formato de fecha ──────────────────────────────────────────────────────
+function fmtDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleString("es-CO", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return iso; }
+}
+
+function todayStr() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function monthStartStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
 
 export default function AdminScreen() {
   const router   = useRouter();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const palette  = getPalette("male");
 
   const [tab,             setTab]             = useState<Tab>("registros");
   const [loading,         setLoading]         = useState(true);
-  const [rows,            setRows]            = useState<BarberCommission[]>([]);
   const [professionals,   setProfessionals]   = useState<Professional[]>([]);
-  const [commissionError, setCommissionError] = useState<string | null>(null);
-  const [selected,        setSelected]        = useState<Professional | null>(null);
-  const [rejectModal,     setRejectModal]     = useState(false);
-  const [rejectReason,    setRejectReason]    = useState("");
-  const [acting,          setActing]          = useState(false);
-  const [imageModal,      setImageModal]      = useState<string | null>(null);
+  const [byProf,          setByProf]          = useState<ByProfRow[]>([]);
+  const [history,         setHistory]         = useState<Commission[]>([]);
+  const [totals,          setTotals]          = useState<Totals | null>(null);
+  const [filteredTotals,  setFilteredTotals]  = useState<Totals | null>(null);
+  const [commError,       setCommError]       = useState<string | null>(null);
 
-  // ── Cargar datos ──────────────────────────────────────────────────────
+  // Filtros de fecha
+  const [dateFrom, setDateFrom] = useState(monthStartStr());
+  const [dateTo,   setDateTo]   = useState(todayStr());
+
+  // Estado modales
+  const [selected,      setSelected]      = useState<Professional | null>(null);
+  const [rejectModal,   setRejectModal]   = useState(false);
+  const [rejectReason,  setRejectReason]  = useState("");
+  const [acting,        setActing]        = useState(false);
+  const [imageModal,    setImageModal]    = useState<string | null>(null);
+  const [showHistory,   setShowHistory]   = useState(false);
+
+  // ── Cargar registros pendientes ────────────────────────────────────────
   const loadPending = async () => {
     try {
       const res = await api.get("/auth/pending-professionals");
@@ -67,36 +124,40 @@ export default function AdminScreen() {
     } catch {}
   };
 
+  // ── Cargar comisiones ──────────────────────────────────────────────────
   const loadCommissions = async () => {
     try {
-      const res  = await api.get("/admin/commissions");
-      const data: BarberCommission[] = Array.isArray(res.data)
-        ? res.data
-        : Array.isArray(res.data?.data)
-        ? res.data.data : [];
-      setRows(data);
+      const res = await api.get(`/admin/commissions?from=${dateFrom}&to=${dateTo}`);
+      setByProf(res.data?.data || []);
+      setHistory(res.data?.history || []);
+      setTotals(res.data?.totals || null);
+      setFilteredTotals(res.data?.filtered_totals || null);
+      setCommError(null);
     } catch (err: any) {
-      setCommissionError(
-        err?.response?.data?.error ||
-        "Expone GET /admin/commissions para ver el consolidado."
-      );
+      setCommError(err?.response?.data?.error || "Error cargando comisiones");
     }
   };
 
   useEffect(() => {
-    Promise.all([loadPending(), loadCommissions()]).finally(() => setLoading(false));
+    Promise.all([loadPending(), loadCommissions()])
+      .finally(() => setLoading(false));
   }, []);
 
-  const totalCommission = useMemo(
-    () => rows.reduce((sum, r) => sum + Number(r.commission_total || 0), 0),
-    [rows]
+  // Recargar comisiones al cambiar fechas
+  useEffect(() => {
+    loadCommissions();
+  }, [dateFrom, dateTo]);
+
+  const totalByProf = useMemo(
+    () => byProf.reduce((s, r) => s + Number(r.commission_total || 0), 0),
+    [byProf]
   );
 
   // ── Aprobar ───────────────────────────────────────────────────────────
   const handleApprove = (prof: Professional) => {
     Alert.alert(
       "Aprobar registro",
-      `¿Confirmas que deseas aprobar la cuenta de ${prof.name}?\n\nSe le notificará y podrá comenzar a recibir servicios.`,
+      `¿Confirmas aprobar la cuenta de ${prof.name}?`,
       [
         { text: "Cancelar", style: "cancel" },
         {
@@ -105,7 +166,7 @@ export default function AdminScreen() {
             setActing(true);
             try {
               await api.post(`/auth/review-professional/${prof.id}`, { action: "approve" });
-              Alert.alert("✅ Aprobado", `La cuenta de ${prof.name} fue activada.`);
+              Alert.alert("✅ Aprobado", `${prof.name} ya puede recibir servicios.`);
               setSelected(null);
               loadPending();
             } catch (err: any) {
@@ -126,10 +187,9 @@ export default function AdminScreen() {
     setActing(true);
     try {
       await api.post(`/auth/review-professional/${selected.id}`, {
-        action: "reject",
-        reason: rejectReason,
+        action: "reject", reason: rejectReason,
       });
-      Alert.alert("❌ Rechazado", `El registro de ${selected.name} fue rechazado.`);
+      Alert.alert("❌ Rechazado", `Registro de ${selected.name} rechazado.`);
       setRejectModal(false);
       setSelected(null);
       setRejectReason("");
@@ -139,19 +199,43 @@ export default function AdminScreen() {
     } finally { setActing(false); }
   };
 
+  // ── Ver documento ─────────────────────────────────────────────────────
   const openDoc = (url?: string) => {
     if (!url) { Alert.alert("Sin documento", "No se adjuntó este documento"); return; }
-    // Si es base64 o URL directa, mostrar en modal de imagen
+    if (url.startsWith("data:application/pdf") || url.includes(".pdf")) {
+      Alert.alert(
+        "Documento PDF",
+        "Los PDF no pueden visualizarse directamente en la app. El documento fue adjuntado correctamente al registro.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
     if (url.startsWith("data:image") || url.startsWith("http")) {
       setImageModal(url);
     } else {
-      Linking.openURL(url).catch(() => Alert.alert("Error", "No se pudo abrir"));
+      Alert.alert("Documento", "Formato no soportado para previsualización");
     }
+  };
+
+  // ── Logout ────────────────────────────────────────────────────────────
+  const handleLogout = async () => {
+    Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Salir",
+        style: "destructive",
+        onPress: async () => {
+          try { await logout(); } catch {}
+          setTimeout(() => router.replace("/login"), 100);
+        },
+      },
+    ]);
   };
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center",
+        backgroundColor: palette.background }}>
         <ActivityIndicator color={palette.primary} size="large" />
       </View>
     );
@@ -162,16 +246,27 @@ export default function AdminScreen() {
       padding: 20, gap: 14,
       backgroundColor: palette.background, paddingBottom: 40,
     }}>
-      <Text style={{ color: palette.text, fontSize: 24, fontWeight: "900" }}>
-        Panel Administrador
-      </Text>
+      {/* Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={{ color: palette.text, fontSize: 22, fontWeight: "900" }}>
+          Panel Administrador
+        </Text>
+        <TouchableOpacity
+          onPress={handleLogout}
+          style={{ borderWidth: 1, borderColor: "#dd0000",
+            paddingVertical: 7, paddingHorizontal: 14, borderRadius: 8 }}
+        >
+          <Text style={{ color: "#dd0000", fontWeight: "700", fontSize: 13 }}>
+            Salir
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* ── TABS ── */}
       <View style={{ flexDirection: "row", gap: 8 }}>
         {(["registros", "comisiones"] as Tab[]).map((t) => (
           <TouchableOpacity
-            key={t}
-            onPress={() => setTab(t)}
+            key={t} onPress={() => setTab(t)}
             style={{
               flex: 1, paddingVertical: 10, borderRadius: 10,
               borderWidth: 1,
@@ -180,21 +275,18 @@ export default function AdminScreen() {
               alignItems: "center",
             }}
           >
-            <Text style={{
-              color: tab === t ? "#000" : palette.text,
-              fontWeight: "700",
-            }}>
+            <Text style={{ color: tab === t ? "#000" : palette.text, fontWeight: "700" }}>
               {t === "registros"
-                ? `Registros pendientes${professionals.length > 0 ? ` (${professionals.length})` : ""}`
+                ? `Registros${professionals.length > 0 ? ` (${professionals.length})` : ""}`
                 : "Comisiones"}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* ══════════════════════════════════════════════════════════════
+      {/* ══════════════════════════════════════════════════
           TAB 1 — REGISTROS PENDIENTES
-      ══════════════════════════════════════════════════════════════ */}
+      ══════════════════════════════════════════════════ */}
       {tab === "registros" && (
         <>
           {professionals.length === 0 ? (
@@ -210,8 +302,9 @@ export default function AdminScreen() {
                 backgroundColor: palette.card, borderRadius: 12,
                 padding: 16, borderWidth: 1, borderColor: "#D4AF37",
               }}>
-                {/* Header */}
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                {/* Header profesional */}
+                <View style={{ flexDirection: "row", alignItems: "center",
+                  gap: 12, marginBottom: 12 }}>
                   {prof.profile_photo ? (
                     <TouchableOpacity onPress={() => setImageModal(prof.profile_photo!)}>
                       <Image source={{ uri: prof.profile_photo }}
@@ -249,10 +342,7 @@ export default function AdminScreen() {
                     </Text>
                   )}
                   <Text style={{ color: "#666", fontSize: 11 }}>
-                    Registrado: {new Date(prof.created_at).toLocaleDateString("es-CO", {
-                      day: "2-digit", month: "2-digit", year: "numeric",
-                      hour: "2-digit", minute: "2-digit",
-                    })}
+                    Registrado: {fmtDate(prof.created_at)}
                   </Text>
                 </View>
 
@@ -264,12 +354,11 @@ export default function AdminScreen() {
                   {[
                     { label: "📄 Cédula frente",  url: prof.id_front },
                     { label: "📄 Cédula reverso", url: prof.id_back },
-                    { label: "🎓 Diploma/Cert.",  url: prof.diploma },
-                    { label: "🔍 Antecedentes",   url: prof.antecedentes_doc },
+                    { label: "🎓 Diploma",         url: prof.diploma },
+                    { label: "🔍 Antecedentes",    url: prof.antecedentes_doc },
                   ].map(({ label, url }) => (
                     <TouchableOpacity
-                      key={label}
-                      onPress={() => openDoc(url)}
+                      key={label} onPress={() => openDoc(url)}
                       style={{
                         backgroundColor: url ? "#0d1b2e" : "#1a1a1a",
                         borderWidth: 1,
@@ -287,23 +376,18 @@ export default function AdminScreen() {
                 {/* Acciones */}
                 <View style={{ flexDirection: "row", gap: 10 }}>
                   <TouchableOpacity
-                    onPress={() => handleApprove(prof)}
-                    disabled={acting}
-                    style={{
-                      flex: 1, backgroundColor: "#0A7E07",
-                      padding: 12, borderRadius: 10, alignItems: "center",
-                    }}
+                    onPress={() => handleApprove(prof)} disabled={acting}
+                    style={{ flex: 1, backgroundColor: "#0A7E07",
+                      padding: 12, borderRadius: 10, alignItems: "center" }}
                   >
                     <Text style={{ color: "#fff", fontWeight: "900" }}>✅ Aprobar</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => { setSelected(prof); setRejectModal(true); }}
                     disabled={acting}
-                    style={{
-                      flex: 1, backgroundColor: "#2a0a0a",
+                    style={{ flex: 1, backgroundColor: "#2a0a0a",
                       borderWidth: 1, borderColor: "#dd0000",
-                      padding: 12, borderRadius: 10, alignItems: "center",
-                    }}
+                      padding: 12, borderRadius: 10, alignItems: "center" }}
                   >
                     <Text style={{ color: "#dd0000", fontWeight: "900" }}>❌ Rechazar</Text>
                   </TouchableOpacity>
@@ -314,59 +398,222 @@ export default function AdminScreen() {
         </>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════
+      {/* ══════════════════════════════════════════════════
           TAB 2 — COMISIONES
-      ══════════════════════════════════════════════════════════════ */}
+      ══════════════════════════════════════════════════ */}
       {tab === "comisiones" && (
         <>
-          <Text style={{ color: palette.text }}>Comisión acumulada por profesional</Text>
-
-          {commissionError && (
-            <View style={{ backgroundColor: "#1a1100", padding: 12,
-              borderRadius: 8, borderWidth: 1, borderColor: "#D4AF37" }}>
-              <Text style={{ color: "#D4AF37" }}>{commissionError}</Text>
+          {/* Saldo total de la app */}
+          {totals && (
+            <View style={{
+              backgroundColor: "#0a2a0a", borderWidth: 2,
+              borderColor: "#4caf50", borderRadius: 14, padding: 16, gap: 6,
+            }}>
+              <Text style={{ color: "#4caf50", fontWeight: "900", fontSize: 13, letterSpacing: 1 }}>
+                💰 SALDO TOTAL DE LA APP
+              </Text>
+              <Text style={{ color: "#22C55E", fontWeight: "900", fontSize: 32 }}>
+                ${Number(totals.saldo_app).toLocaleString("es-CO")}
+                <Text style={{ fontSize: 14, fontWeight: "400" }}> COP</Text>
+              </Text>
+              <Text style={{ color: "#888", fontSize: 12 }}>
+                {totals.total_transacciones} transacciones completadas •{" "}
+                Total servicios: ${Number(totals.total_servicios).toLocaleString("es-CO")} COP
+              </Text>
             </View>
           )}
 
-          {rows.map((row) => (
-            <View key={row.barber_id} style={{
-              borderWidth: 1, borderColor: "#444",
-              borderRadius: 8, padding: 12,
-              backgroundColor: palette.card,
+          {/* Filtro de fechas */}
+          <View style={{
+            backgroundColor: palette.card, borderRadius: 12,
+            padding: 14, gap: 10,
+          }}>
+            <Text style={{ color: palette.primary, fontWeight: "700" }}>
+              🗓 Filtrar por fechas
+            </Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#888", fontSize: 11, marginBottom: 4 }}>Desde</Text>
+                <TextInput
+                  value={dateFrom}
+                  onChangeText={setDateFrom}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#555"
+                  style={{
+                    backgroundColor: "#1a1a1a", borderWidth: 1,
+                    borderColor: palette.primary + "55",
+                    borderRadius: 8, padding: 10, color: "#fff", fontSize: 13,
+                  }}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#888", fontSize: 11, marginBottom: 4 }}>Hasta</Text>
+                <TextInput
+                  value={dateTo}
+                  onChangeText={setDateTo}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#555"
+                  style={{
+                    backgroundColor: "#1a1a1a", borderWidth: 1,
+                    borderColor: palette.primary + "55",
+                    borderRadius: 8, padding: 10, color: "#fff", fontSize: 13,
+                  }}
+                />
+              </View>
+            </View>
+            {/* Shortcuts de fecha */}
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {[
+                { label: "Hoy",       from: todayStr(),    to: todayStr() },
+                { label: "Este mes",  from: monthStartStr(), to: todayStr() },
+                { label: "Todo",      from: "2024-01-01",  to: todayStr() },
+              ].map(({ label, from, to }) => (
+                <TouchableOpacity
+                  key={label}
+                  onPress={() => { setDateFrom(from); setDateTo(to); }}
+                  style={{
+                    flex: 1, backgroundColor: "#1a1a1a",
+                    borderWidth: 1, borderColor: "#555",
+                    borderRadius: 8, padding: 8, alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "#aaa", fontSize: 12 }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Totales del período filtrado */}
+          {filteredTotals && (
+            <View style={{
+              backgroundColor: palette.card, borderRadius: 12,
+              padding: 14, borderWidth: 1, borderColor: palette.primary + "55",
             }}>
+              <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 8 }}>
+                Período: {dateFrom} → {dateTo}
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+                {[
+                  { label: "Transacciones",        value: filteredTotals.total_transacciones },
+                  { label: "Servicios totales",     value: `$${Number(filteredTotals.total_servicios).toLocaleString("es-CO")}` },
+                  { label: "Comisiones (app)",       value: `$${Number(filteredTotals.saldo_app).toLocaleString("es-CO")}` },
+                  { label: "Pagado profesionales",   value: `$${Number(filteredTotals.total_profesionales).toLocaleString("es-CO")}` },
+                ].map(({ label, value }) => (
+                  <View key={label} style={{
+                    backgroundColor: "#1a1a1a", borderRadius: 10,
+                    padding: 12, minWidth: "45%", flex: 1,
+                  }}>
+                    <Text style={{ color: "#888", fontSize: 11 }}>{label}</Text>
+                    <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 16 }}>
+                      {value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Por profesional */}
+          {commError && (
+            <View style={{ backgroundColor: "#1a1100", padding: 12,
+              borderRadius: 8, borderWidth: 1, borderColor: "#D4AF37" }}>
+              <Text style={{ color: "#D4AF37" }}>{commError}</Text>
+            </View>
+          )}
+
+          {byProf.length > 0 && (
+            <>
               <Text style={{ color: palette.text, fontWeight: "700" }}>
-                {row.barber_name || `Profesional #${row.barber_id}`}
+                Por profesional
               </Text>
-              <Text style={{ color: "#aaa" }}>
-                Finalizados: {row.completed_total || 0}
+              {byProf.map((row) => (
+                <View key={row.barber_id} style={{
+                  borderWidth: 1, borderColor: "#333",
+                  borderRadius: 10, padding: 12, backgroundColor: palette.card,
+                }}>
+                  <Text style={{ color: palette.text, fontWeight: "700" }}>
+                    {row.barber_name || `#${row.barber_id}`}
+                  </Text>
+                  <Text style={{ color: "#aaa", fontSize: 12 }}>
+                    Servicios: {row.completed_total || 0}
+                  </Text>
+                  <Text style={{ color: palette.primary, fontWeight: "700" }}>
+                    Comisión app: ${Number(row.commission_total || 0).toLocaleString("es-CO")}
+                  </Text>
+                  <Text style={{ color: "#888", fontSize: 12 }}>
+                    Pagado al profesional: ${Number(row.revenue_total || 0).toLocaleString("es-CO")}
+                  </Text>
+                </View>
+              ))}
+            </>
+          )}
+
+          {/* Histórico detallado */}
+          <TouchableOpacity
+            onPress={() => setShowHistory(!showHistory)}
+            style={{
+              backgroundColor: "#0d1b2e", borderWidth: 1,
+              borderColor: palette.primary, borderRadius: 10,
+              padding: 14, alignItems: "center",
+            }}
+          >
+            <Text style={{ color: palette.primary, fontWeight: "700" }}>
+              {showHistory ? "▲ Ocultar histórico" : `▼ Ver histórico detallado (${history.length})`}
+            </Text>
+          </TouchableOpacity>
+
+          {showHistory && history.map((c) => (
+            <View key={c.id} style={{
+              backgroundColor: palette.card, borderRadius: 10,
+              padding: 12, borderWidth: 1, borderColor: "#333", gap: 3,
+            }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: "#aaa", fontSize: 11 }}>
+                  Servicio #{c.service_id}
+                </Text>
+                <Text style={{ color: "#666", fontSize: 11 }}>
+                  {fmtDate(c.created_at)}
+                </Text>
+              </View>
+              <Text style={{ color: palette.text, fontWeight: "700" }}>
+                {c.professional_name || "—"}
+                <Text style={{ color: "#888", fontWeight: "400", fontSize: 12 }}>
+                  {" "}({ROLE_LABELS[c.professional_role || ""] || c.professional_role})
+                </Text>
               </Text>
-              <Text style={{ color: palette.primary, fontWeight: "700" }}>
-                Comisión: ${Number(row.commission_total || 0).toLocaleString("es-CO")}
-              </Text>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
+                <Text style={{ color: "#aaa", fontSize: 12 }}>
+                  {PAYMENT_LABELS[c.payment_method] || c.payment_method}
+                </Text>
+                <Text style={{ color: palette.primary, fontWeight: "700" }}>
+                  Total: ${Number(c.total_service).toLocaleString("es-CO")}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: "#4caf50", fontSize: 12 }}>
+                  Comisión app: ${Number(c.commission_amt).toLocaleString("es-CO")}
+                </Text>
+                <Text style={{ color: "#888", fontSize: 12 }}>
+                  Profesional: ${Number(c.professional_amt).toLocaleString("es-CO")}
+                </Text>
+              </View>
             </View>
           ))}
-
-          <View style={{
-            backgroundColor: "#111", padding: 14, borderRadius: 8,
-            borderWidth: 1, borderColor: palette.primary,
-          }}>
-            <Text style={{ color: palette.text, fontWeight: "700", fontSize: 16 }}>
-              Total comisiones: ${totalCommission.toLocaleString("es-CO")} COP
-            </Text>
-          </View>
         </>
       )}
 
       {/* ── Volver ── */}
       <TouchableOpacity
         onPress={() => router.back()}
-        style={{ borderWidth: 1, borderColor: "#555", padding: 12,
-          borderRadius: 10, alignItems: "center", marginTop: 8 }}
+        style={{
+          borderWidth: 1, borderColor: "#555",
+          padding: 12, borderRadius: 10, alignItems: "center", marginTop: 8,
+        }}
       >
-        <Text style={{ color: "#aaa" }}>Volver</Text>
+        <Text style={{ color: "#aaa" }}>← Volver al perfil</Text>
       </TouchableOpacity>
 
-      {/* ══ Modal: Rechazar con motivo ══════════════════════════════════ */}
+      {/* ══ Modal rechazar ══════════════════════════════════════════════ */}
       <Modal visible={rejectModal} transparent animationType="slide">
         <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#00000099" }}>
           <View style={{
@@ -374,20 +621,16 @@ export default function AdminScreen() {
             borderTopRightRadius: 20, padding: 28, gap: 16,
           }}>
             <Text style={{ color: "#fff", fontWeight: "900", fontSize: 18 }}>
-              Rechazar registro de {selected?.name}
+              Rechazar: {selected?.name}
             </Text>
-            <Text style={{ color: "#888", fontSize: 13 }}>
-              El profesional recibirá una notificación con el motivo.
-            </Text>
-            <Text style={{ color: "#aaa", fontSize: 12 }}>
+            <Text style={{ color: "#888", fontSize: 12 }}>
               Ejemplos: "Documentos ilegibles", "Foto de cédula borrosa",
-              "Antecedentes positivos", "Diploma no válido"
+              "Antecedentes positivos", "Diploma no válido o expirado"
             </Text>
             <TextInput
               placeholder="Escribe el motivo del rechazo..."
               placeholderTextColor="#555"
-              multiline
-              numberOfLines={4}
+              multiline numberOfLines={4}
               value={rejectReason}
               onChangeText={setRejectReason}
               style={{
@@ -405,7 +648,7 @@ export default function AdminScreen() {
                 padding: 16, borderRadius: 10, alignItems: "center",
               }}
             >
-              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}>
+              <Text style={{ color: "#fff", fontWeight: "900" }}>
                 {acting ? "Rechazando..." : "Confirmar rechazo"}
               </Text>
             </TouchableOpacity>
@@ -419,7 +662,7 @@ export default function AdminScreen() {
         </View>
       </Modal>
 
-      {/* ══ Modal: Ver imagen de documento ══════════════════════════════ */}
+      {/* ══ Modal ver imagen documento ══════════════════════════════════ */}
       <Modal visible={!!imageModal} transparent animationType="fade">
         <TouchableOpacity
           style={{ flex: 1, backgroundColor: "#000000ee",
