@@ -1,5 +1,6 @@
 // app/barber/jobs.tsx
 import { SERVICE_CATALOG, formatPrice, roleToProType } from "@/constants/services";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -193,15 +194,18 @@ export default function Jobs() {
 
   // Obtener ubicación del profesional para calcular distancia
   useEffect(() => {
-    import("expo-location").then((Location) => {
-      Location.getForegroundPermissionsAsync().then(({ status }) => {
+    const getLocation = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
         if (status === "granted") {
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-            .then((loc) => setMyLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude }))
-            .catch(() => {});
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          setMyLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
         }
-      });
-    });
+      } catch {}
+    };
+    getLocation();
   }, []);
 
   useEffect(() => {

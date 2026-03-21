@@ -311,7 +311,15 @@ export default function BarberHome() {
       </TouchableOpacity>
 
       <TouchableOpacity
-        onPress={async () => { await logout(); router.replace("/login"); }}
+        onPress={async () => {
+          try {
+            await logout();
+          } catch {}
+          // Pequeño delay para asegurar que el estado se limpie antes de navegar
+          setTimeout(() => {
+            router.replace("/login");
+          }, 100);
+        }}
         style={{
           borderWidth: 1, borderColor: "#dd0000",
           padding: 14, borderRadius: 10, alignItems: "center", marginTop: 8,

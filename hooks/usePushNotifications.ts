@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import api from "../api";
+import { playSound } from "@/utils/sounds";
 
 // Mostrar notificaciones SIEMPRE — incluso con app abierta en primer plano
 Notifications.setNotificationHandler({
@@ -125,6 +126,8 @@ export function usePushNotifications(userId?: number, role?: string) {
         const data = notification.request.content.data as any;
 
         if (data?.type === "new_service") {
+          // Reproducir sonido de nueva solicitud
+          playSound("new_request").catch(() => {});
           // Mostrar Alert con opciones: Aceptar, Contraoferta, Omitir
           Alert.alert(
             `✂️ ${data.service_type || "Nuevo servicio"}`,
