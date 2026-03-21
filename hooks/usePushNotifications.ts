@@ -7,12 +7,15 @@ import { Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import api from "../api";
 
-// Mostrar notificaciones cuando la app está abierta
+// Mostrar notificaciones SIEMPRE — incluso con app abierta en primer plano
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge:  true,
+    shouldShowAlert:   true,
+    shouldPlaySound:   true,
+    shouldSetBadge:    true,
+    shouldShowBanner:  true,
+    shouldShowList:    true,
+    priority: Notifications.AndroidNotificationPriority.MAX,
   }),
 });
 
@@ -47,13 +50,26 @@ export function usePushNotifications(userId?: number, role?: string) {
 
         // Canal Android con sonido
         if (Platform.OS === "android") {
+          // Eliminar canal anterior y recrear para garantizar configuración correcta
+          await Notifications.deleteNotificationChannelAsync("styleapp-notifications").catch(() => {});
           await Notifications.setNotificationChannelAsync("styleapp-notifications", {
-            name:             "StyleApp",
+            name:             "StyleApp — Solicitudes",
             importance:       Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
+            vibrationPattern: [0, 300, 200, 300],
             lightColor:       "#D4AF37",
             sound:            "default",
             enableVibrate:    true,
+            showBadge:        true,
+            bypassDnd:        true,  // pasa por no molestar
+          });
+          // Canal adicional para alertas críticas
+          await Notifications.setNotificationChannelAsync("styleapp-urgent", {
+            name:             "StyleApp — Urgente",
+            importance:       Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 500, 200, 500],
+            sound:            "default",
+            enableVibrate:    true,
+            bypassDnd:        true,
           });
         }
 
