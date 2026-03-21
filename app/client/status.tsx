@@ -274,20 +274,54 @@ export default function ClientStatus() {
 
   const cancelService = async () => {
     if (!request?.id) return;
-    Alert.alert("Cancelar servicio", "¿Estás seguro?", [
-      { text: "Mantener", style: "cancel" },
-      {
-        text: "Sí, cancelar", style: "destructive",
-        onPress: async () => {
-          try {
-            await api.patch(`/service-requests/${request.id}/status`, { status: "cancelled" });
-            router.replace("/client/home");
-          } catch (err: any) {
-            Alert.alert("Error", err?.response?.data?.error || "No se pudo cancelar");
-          }
+
+    const status         = request.status || "open";
+    const price          = request.price  || 0;
+    const paymentMethod  = request.payment_method || "";
+    const HAS_PENALTY    = ["accepted", "on_route", "arrived"].includes(status);
+    const penalty        = Math.round(price * 0.15);
+    const MP_METHODS     = ["pse", "tarjeta"];
+    const isMPPayment    = MP_METHODS.includes(paymentMethod);
+
+    const penaltyMsg = HAS_PENALTY
+      ? isMPPayment
+        ? `\n\n⚠️ Se descontará el 15% ($${penalty.toLocaleString("es-CO")} COP) como penalización.\nRecibirás el 85% restante en tu saldo.`
+        : `\n\n⚠️ Se descontará el 15% ($${penalty.toLocaleString("es-CO")} COP) de tu saldo como penalización.`
+      : "\n\nNo se aplicará penalización ya que el servicio no ha sido aceptado aún.";
+
+    Alert.alert(
+      "Cancelar servicio",
+      `¿Confirmas que deseas cancelar este servicio?${penaltyMsg}`,
+      [
+        { text: "Mantener servicio", style: "cancel" },
+        {
+          text: "Sí, cancelar",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              if (HAS_PENALTY) {
+                // Usar endpoint de cancelación con penalización
+                const res = await api.post(`/payments/cancel-service/${request.id}`, {});
+                if (res.data.penalized) {
+                  Alert.alert(
+                    "Servicio cancelado",
+                    `Se descontaron $${penalty.toLocaleString("es-CO")} COP de penalización (15%).`,
+                    [{ text: "OK", onPress: () => router.replace("/client/home") }]
+                  );
+                } else {
+                  router.replace("/client/home");
+                }
+              } else {
+                await api.patch(`/service-requests/${request.id}/status`, { status: "cancelled" });
+                router.replace("/client/home");
+              }
+            } catch (err: any) {
+              Alert.alert("Error", err?.response?.data?.error || "No se pudo cancelar");
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const acceptedBid  = bids.find((b) => b.status === "accepted");

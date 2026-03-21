@@ -128,7 +128,12 @@ export function usePushNotifications(userId?: number, role?: string) {
           // Mostrar Alert con opciones: Aceptar, Contraoferta, Omitir
           Alert.alert(
             `✂️ ${data.service_type || "Nuevo servicio"}`,
-            `📍 ${data.address || ""}\n💰 $${Number(data.price || 0).toLocaleString("es-CO")} COP\n🚗 ${data.distance || ""} · ~${data.eta || ""}`,
+            [
+              data.service_type || "Servicio",
+              `📍 ${data.address || ""}`,
+              `💰 $${Number(data.price || 0).toLocaleString("es-CO")} COP`,
+              data.distance ? `🚗 ${data.distance} · ${data.eta || ""}` : "",
+            ].filter(Boolean).join("\n"),
             [
               {
                 text: "✅ Aceptar",
@@ -171,6 +176,10 @@ export function usePushNotifications(userId?: number, role?: string) {
               {
                 text: "Omitir",
                 style: "cancel",
+                onPress: () => {
+                  // No hace nada — el servicio sigue visible en solicitudes disponibles
+                  console.log("Notificación omitida, servicio disponible en jobs");
+                },
               },
             ],
             { cancelable: true }

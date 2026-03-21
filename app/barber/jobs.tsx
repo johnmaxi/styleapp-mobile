@@ -21,10 +21,36 @@ type RequestItem = {
   latitude?:         number;
   longitude?:        number;
   payment_method?:   string;
+  expires_at?:       string;
+  // calculados en cliente
+  distance?:         number;
+  eta?:              string;
 };
 
 type BidStatus = "none" | "pending" | "accepted" | "rejected";
 type MyBidMap  = Record<number, { bidId: number; status: BidStatus; amount: number }>;
+
+// Calcular distancia entre dos puntos (Haversine)
+function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R    = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a    = Math.sin(dLat/2) * Math.sin(dLat/2) +
+               Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) *
+               Math.sin(dLng/2) * Math.sin(dLng/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function etaText(km: number): string {
+  const min = Math.round((km / 25) * 60);
+  if (min < 2)  return "~2 min";
+  if (min < 60) return `~${min} min`;
+  return `~${Math.floor(min/60)}h ${min%60}min`;
+}
+
+function distText(km: number): string {
+  return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
+}
 
 const PAYMENT_LABELS: Record<string, string> = {
   efectivo: "💵 Efectivo",
@@ -165,6 +191,19 @@ export default function Jobs() {
     }
   }, [loadMyBids]);
 
+  // Obtener ubicación del profesional para calcular distancia
+  useEffect(() => {
+    import("expo-location").then((Location) => {
+      Location.getForegroundPermissionsAsync().then(({ status }) => {
+        if (status === "granted") {
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+            .then((loc) => setMyLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude }))
+            .catch(() => {});
+        }
+      });
+    });
+  }, []);
+
   useEffect(() => {
     loadOpenRequests();
     const timer = setInterval(loadOpenRequests, 6000);
@@ -290,6 +329,29 @@ export default function Jobs() {
               <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 4 }}>
                 💰 {item.price ? formatPrice(item.price) : "Sin precio"}
               </Text>
+
+              {/* Distancia y tiempo estimado */}
+              {myLocation && item.latitude && item.longitude && (() => {
+                const km  = distanceKm(myLocation.lat, myLocation.lng, item.latitude, item.longitude);
+                const eta = etaText(km);
+                const dst = distText(km);
+                return (
+                  <Text style={{ color: "#4a90e2", fontSize: 12, marginBottom: 4 }}>
+                    🚗 {dst} · {eta} desde tu ubicación
+                  </Text>
+                );
+              })()}
+
+              {/* Tiempo restante antes de expirar */}
+              {item.expires_at && (() => {
+                const remaining = Math.round((new Date(item.expires_at).getTime() - Date.now()) / 60000);
+                if (remaining <= 0) return null;
+                return (
+                  <Text style={{ color: remaining <= 3 ? "#dd0000" : "#888", fontSize: 11, marginBottom: 4 }}>
+                    ⏰ Expira en {remaining} min
+                  </Text>
+                );
+              })()}
 
               {/* Método de pago */}
               {item.payment_method && (
