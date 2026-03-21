@@ -604,7 +604,13 @@ export default function AdminScreen() {
 
       {/* ── Volver ── */}
       <TouchableOpacity
-        onPress={() => router.back()}
+        onPress={() => {
+          if (router.canGoBack?.()) {
+            router.back();
+          } else {
+            router.replace("/profile");
+          }
+        }}
         style={{
           borderWidth: 1, borderColor: "#555",
           padding: 12, borderRadius: 10, alignItems: "center", marginTop: 8,

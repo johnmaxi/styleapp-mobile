@@ -123,70 +123,50 @@ export function usePushNotifications(userId?: number, role?: string) {
     // Notificación recibida con app abierta — mostrar Alert con acciones
     notificationListener.current = Notifications.addNotificationReceivedListener(
       (notification) => {
-        const data = notification.request.content.data as any;
+        try {
+          const data = notification.request.content.data as any;
+          if (!data || data?.type !== "new_service") return;
 
-        if (data?.type === "new_service") {
-          // Reproducir sonido de nueva solicitud
+          // Reproducir sonido
           playSound("new_request").catch(() => {});
-          // Mostrar Alert con opciones: Aceptar, Contraoferta, Omitir
+
+          const bodyLines = [
+            data.service_type || "Servicio",
+            data.address ? `📍 ${data.address}` : null,
+            `💰 $${Number(data.price || 0).toLocaleString("es-CO")} COP`,
+            data.distance ? `🚗 ${data.distance} · ${data.eta || ""}` : null,
+          ].filter(Boolean).join("\n");
+
           Alert.alert(
-            `✂️ ${data.service_type || "Nuevo servicio"}`,
-            [
-              data.service_type || "Servicio",
-              `📍 ${data.address || ""}`,
-              `💰 $${Number(data.price || 0).toLocaleString("es-CO")} COP`,
-              data.distance ? `🚗 ${data.distance} · ${data.eta || ""}` : "",
-            ].filter(Boolean).join("\n"),
+            "✂️ Nuevo servicio disponible",
+            bodyLines,
             [
               {
                 text: "✅ Aceptar",
-                onPress: async () => {
+                onPress: () => {
+                  // Navegar a jobs y aceptar desde ahí — más seguro que aceptar directo
                   try {
-                    const res = await api.post("/bids/accept-direct", {
-                      service_request_id: Number(data.service_id),
-                    });
-                    if (res.data?.ok) {
-                      router.push({
-                        pathname: "/barber/active",
-                        params: {
-                          id:           String(data.service_id),
-                          service_type: data.service_type || "",
-                          address:      data.address      || "",
-                          price:        String(data.price || 0),
-                          status:       "accepted",
-                        },
-                      });
-                    }
-                  } catch (err: any) {
-                    Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar");
-                  }
+                    router.replace("/barber/jobs");
+                  } catch {}
                 },
               },
               {
-                text: "💬 Contraoferta",
+                text: "💬 Ver solicitudes",
                 onPress: () => {
-                  router.push({
-                    pathname: "/barber/offer",
-                    params: {
-                      requestId:    String(data.service_id),
-                      currentPrice: String(data.price || 0),
-                      serviceType:  data.service_type || "",
-                      address:      data.address      || "",
-                    },
-                  });
+                  try {
+                    router.replace("/barber/jobs");
+                  } catch {}
                 },
               },
               {
                 text: "Omitir",
                 style: "cancel",
-                onPress: () => {
-                  // No hace nada — el servicio sigue visible en solicitudes disponibles
-                  console.log("Notificación omitida, servicio disponible en jobs");
-                },
               },
             ],
             { cancelable: true }
           );
+        } catch (err) {
+          console.warn("Error en listener de notificación:", err);
         }
       }
     );
@@ -194,14 +174,18 @@ export function usePushNotifications(userId?: number, role?: string) {
     // Usuario tocó la notificación desde fuera de la app
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const data       = response.notification.request.content.data as any;
-        const actionId   = response.actionIdentifier;
-
-        if (data?.type === "new_service") {
-          if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-            // Tocó la notificación → ir a jobs
-            router.push("/barber/jobs");
+        try {
+          const data = response.notification.request.content.data as any;
+          if (data?.type === "new_service") {
+            // Pequeño delay para asegurar que el router esté listo
+            setTimeout(() => {
+              try {
+                router.replace("/barber/jobs");
+              } catch {}
+            }, 300);
           }
+        } catch (err) {
+          console.warn("Error en response listener:", err);
         }
       }
     );
