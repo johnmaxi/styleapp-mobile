@@ -6,27 +6,20 @@ import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useState } from "react";
 import {
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  Alert, Image, Modal, ScrollView, StyleSheet,
+  Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import api from "../../api";
 
-type Role = "client" | "barber" | "estilista" | "quiropodologo";
-type Gender = "male" | "female";
+type Role          = "client" | "barber" | "estilista" | "quiropodologo";
+type Gender        = "male" | "female";
 type PaymentMethod = "nequi" | "pse" | "efectivo";
 
 const ROLE_OPTIONS: { id: Role; label: string; subtitle: string }[] = [
-  { id: "client",        label: "Cliente",        subtitle: "Voy a solicitar servicios" },
-  { id: "barber",        label: "Barbero",         subtitle: "Ofrecere mis servicios como Barbero(a)" },
-  { id: "estilista",     label: "Estilista",       subtitle: "Ofrecere mis servicios como Estilista" },
-  { id: "quiropodologo", label: "Quiropodologo",   subtitle: "Ofrecere mis servicios como Quiropodologo(a)" },
+  { id: "client",        label: "Cliente",       subtitle: "Voy a solicitar servicios" },
+  { id: "barber",        label: "Barbero",        subtitle: "Ofrecere mis servicios como Barbero(a)" },
+  { id: "estilista",     label: "Estilista",      subtitle: "Ofrecere mis servicios como Estilista" },
+  { id: "quiropodologo", label: "Quiropodologo",  subtitle: "Ofrecere mis servicios como Quiropodologo(a)" },
 ];
 
 const DOCUMENT_TYPES = ["Cedula de ciudadania", "Pasaporte", "Cedula Extranjeria"];
@@ -43,15 +36,10 @@ const NEIGHBORHOODS: Record<string, string[]> = {
 
 const isProfessional = (role: Role) => role !== "client";
 
-// Imagen: max 800KB en base64 (~600KB real)
 const MAX_IMAGE_B64 = 800 * 1024;
-// Documento PDF: max 5MB
 const MAX_DOC_BYTES = 5 * 1024 * 1024;
 
-async function pickImage(
-  label: string,
-  onDone: (b64: string) => void
-) {
+async function pickImage(label: string, onDone: (b64: string) => void) {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) {
     Alert.alert("Permiso requerido", "Activa el acceso a la galeria en Configuracion");
@@ -59,27 +47,18 @@ async function pickImage(
   }
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    allowsEditing: true,
-    aspect: [1, 1],
-    quality: 0.35,
-    base64: true,
+    allowsEditing: true, aspect: [1, 1], quality: 0.35, base64: true,
   });
   if (result.canceled || !result.assets?.[0]?.base64) return;
   const b64 = result.assets[0].base64!;
   if (b64.length > MAX_IMAGE_B64) {
-    Alert.alert(
-      "Imagen muy grande",
-      `La imagen supera el limite de 600KB.\n\nConsejos:\n• Recorta la foto al area necesaria\n• Usa fotos tomadas desde la app (no de alta resolucion)\n• Reducela con una app como "Comprimir foto"\n\nTamano actual: ~${Math.round(b64.length * 0.75 / 1024)}KB`
-    );
+    Alert.alert("Imagen muy grande", `Tamano: ~${Math.round(b64.length * 0.75 / 1024)}KB. Maximo: 600KB`);
     return;
   }
   onDone(`data:image/jpeg;base64,${b64}`);
 }
 
-async function pickImageOrCamera(
-  label: string,
-  onDone: (b64: string) => void
-) {
+async function pickImageOrCamera(label: string, onDone: (b64: string) => void) {
   Alert.alert(label, "Selecciona la fuente", [
     {
       text: "Camara",
@@ -92,13 +71,13 @@ async function pickImageOrCamera(
         if (result.canceled || !result.assets?.[0]?.base64) return;
         const b64 = result.assets[0].base64!;
         if (b64.length > MAX_IMAGE_B64) {
-          Alert.alert("Imagen muy grande", `Reducela y vuelve a intentar.\nTamano: ~${Math.round(b64.length * 0.75 / 1024)}KB\nMaximo: 600KB`);
+          Alert.alert("Imagen muy grande", `~${Math.round(b64.length * 0.75 / 1024)}KB. Max: 600KB`);
           return;
         }
         onDone(`data:image/jpeg;base64,${b64}`);
       },
     },
-    { text: "Galeria", onPress: () => pickImage(label, onDone) },
+    { text: "Galeria",  onPress: () => pickImage(label, onDone) },
     { text: "Cancelar", style: "cancel" },
   ]);
 }
@@ -111,29 +90,20 @@ async function pickDocument(onDone: (b64: string, name: string) => void) {
     });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
-
     if (asset.size && asset.size > MAX_DOC_BYTES) {
-      Alert.alert(
-        "Archivo muy grande",
-        `El archivo supera el limite de 5MB.\nTamano: ~${Math.round(asset.size / 1024 / 1024 * 10) / 10}MB\nMaximo: 5MB`
-      );
+      Alert.alert("Archivo muy grande", `~${Math.round(asset.size / 1024 / 1024 * 10) / 10}MB. Max: 5MB`);
       return;
     }
-
     const response = await fetch(asset.uri);
-    const blob = await response.blob();
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      onDone(dataUrl, asset.name);
-    };
+    const blob     = await response.blob();
+    const reader   = new FileReader();
+    reader.onload  = () => { onDone(reader.result as string, asset.name); };
     reader.readAsDataURL(blob);
   } catch {
     Alert.alert("Error", "No se pudo adjuntar el archivo");
   }
 }
 
-// Componente para adjuntar cedula/diploma (imagen O pdf)
 function DocAttachment({
   label, uri, fileName, onPickImage, onPickDoc, accent, hint,
 }: {
@@ -148,7 +118,8 @@ function DocAttachment({
       <View style={{ flexDirection: "row", gap: 8 }}>
         <TouchableOpacity
           onPress={onPickImage}
-          style={{ flex: 1, borderWidth: 1, borderColor: accent, borderStyle: "dashed", borderRadius: 8, padding: 12, alignItems: "center" }}
+          style={{ flex: 1, borderWidth: 1, borderColor: accent, borderStyle: "dashed",
+            borderRadius: 8, padding: 12, alignItems: "center" }}
         >
           {uri && !uri.startsWith("data:application") ? (
             <Image source={{ uri }} style={{ width: "100%", height: 70, borderRadius: 6 }} resizeMode="cover" />
@@ -162,7 +133,8 @@ function DocAttachment({
         </TouchableOpacity>
         <TouchableOpacity
           onPress={onPickDoc}
-          style={{ flex: 1, borderWidth: 1, borderColor: accent, borderStyle: "dashed", borderRadius: 8, padding: 12, alignItems: "center", justifyContent: "center" }}
+          style={{ flex: 1, borderWidth: 1, borderColor: accent, borderStyle: "dashed",
+            borderRadius: 8, padding: 12, alignItems: "center", justifyContent: "center" }}
         >
           {uri?.startsWith("data:application") || fileName?.endsWith(".pdf") ? (
             <>
@@ -180,9 +152,9 @@ function DocAttachment({
           )}
         </TouchableOpacity>
       </View>
-      {(uri) && (
+      {uri && (
         <Text style={{ color: "#4caf50", fontSize: 11, marginTop: 4 }}>
-          Archivo adjunto correctamente
+          ✓ Archivo adjunto correctamente
         </Text>
       )}
     </View>
@@ -191,46 +163,51 @@ function DocAttachment({
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const [role, setRole] = useState<Role>("client");
-  const [gender, setGender] = useState<Gender>("male");
-  const [loading, setLoading] = useState(false);
+  const [role,          setRole]          = useState<Role>("client");
+  const [gender,        setGender]        = useState<Gender>("male");
+  const [loading,       setLoading]       = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
-  const [firstName, setFirstName]           = useState("");
-  const [secondName, setSecondName]         = useState("");
-  const [lastName, setLastName]             = useState("");
-  const [secondLastName, setSecondLastName] = useState("");
-  const [docType, setDocType]               = useState("Cedula de ciudadania");
-  const [docNumber, setDocNumber]           = useState("");
-  const [phone, setPhone]                   = useState("");
-  const [email, setEmail]                   = useState("");
-  const [username, setUsername]             = useState("");
-  const [password, setPassword]             = useState("");
-  const [address, setAddress]               = useState("");
-  const [city, setCity]                     = useState("Medellin");
-  const [neighborhood, setNeighborhood]     = useState("");
-  const [paymentMethod, setPaymentMethod]   = useState<PaymentMethod>("nequi");
-  const [accountNumber, setAccountNumber]   = useState("");
+  const [firstName,       setFirstName]       = useState("");
+  const [secondName,      setSecondName]      = useState("");
+  const [lastName,        setLastName]        = useState("");
+  const [secondLastName,  setSecondLastName]  = useState("");
+  const [docType,         setDocType]         = useState("Cedula de ciudadania");
+  const [docNumber,       setDocNumber]       = useState("");
+  const [phone,           setPhone]           = useState("");
+  const [email,           setEmail]           = useState("");
+  const [username,        setUsername]        = useState("");
+  const [password,        setPassword]        = useState("");
+  const [address,         setAddress]         = useState("");
+  const [city,            setCity]            = useState("Medellin");
+  const [neighborhood,    setNeighborhood]    = useState("");
+  const [paymentMethod,   setPaymentMethod]   = useState<PaymentMethod>("nequi");
+  const [accountNumber,   setAccountNumber]   = useState("");
   const [gettingLocation, setGettingLocation] = useState(false);
 
-  // Fotos
-  const [profilePhoto, setProfilePhoto]   = useState<string | null>(null);
-  const [portfolio, setPortfolio]         = useState<(string | null)[]>([null, null, null]);
-  const [idFront, setIdFront]             = useState<string | null>(null);
-  const [idFrontName, setIdFrontName]     = useState("");
-  const [idBack, setIdBack]               = useState<string | null>(null);
-  const [idBackName, setIdBackName]       = useState("");
-  const [diploma, setDiploma]             = useState<string | null>(null);
-  const [diplomaName, setDiplomaName]     = useState("");
+  // Fotos y documentos
+  const [profilePhoto,  setProfilePhoto]  = useState<string | null>(null);
+  const [portfolio,     setPortfolio]     = useState<(string | null)[]>([null, null, null]);
+  const [idFront,       setIdFront]       = useState<string | null>(null);
+  const [idFrontName,   setIdFrontName]   = useState("");
+  const [idBack,        setIdBack]        = useState<string | null>(null);
+  const [idBackName,    setIdBackName]    = useState("");
+  const [diploma,       setDiploma]       = useState<string | null>(null);
+  const [diplomaName,   setDiplomaName]   = useState("");
+
+  // ── CAMBIO 1: Estados para antecedentes ──────────────────────────────
+  const [antecedentesDoc,       setAntecedentesDoc]       = useState<string | null>(null);
+  const [antecedentesName,      setAntecedentesName]      = useState("");
+  const [autorizaAntecedentes,  setAutorizaAntecedentes]  = useState(false);
 
   // Dropdowns
-  const [showDocType, setShowDocType]           = useState(false);
-  const [showCity, setShowCity]                 = useState(false);
-  const [showNeighborhood, setShowNeighborhood] = useState(false);
-  const [showPayment, setShowPayment]           = useState(false);
+  const [showDocType,       setShowDocType]       = useState(false);
+  const [showCity,          setShowCity]          = useState(false);
+  const [showNeighborhood,  setShowNeighborhood]  = useState(false);
+  const [showPayment,       setShowPayment]        = useState(false);
 
-  const accent = gender === "male" ? "#D4AF37" : "#FF69B4";
+  const accent     = gender === "male" ? "#D4AF37" : "#FF69B4";
   const onlyLetters = (v: string) => v.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, "");
 
   const updatePortfolio = (index: number, value: string) => {
@@ -248,8 +225,8 @@ export default function RegisterScreen() {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const rev = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
       if (rev[0]) {
-        const street = rev[0].street || "";
-        const num    = rev[0].streetNumber || "";
+        const street  = rev[0].street || "";
+        const num     = rev[0].streetNumber || "";
         const resolved = `${street} ${num}`.trim();
         if (resolved) setAddress(resolved);
         if (rev[0].city && !city) setCity(rev[0].city.split(",")[0]);
@@ -263,23 +240,25 @@ export default function RegisterScreen() {
     }
   };
 
+  // ── CAMBIO 2: Validación con autorización de antecedentes ────────────
   const validate = (): string | null => {
-    if (!firstName.trim())    return "El primer nombre es obligatorio";
-    if (!lastName.trim())     return "El primer apellido es obligatorio";
-    if (!email.trim())        return "El email es obligatorio";
-    if (!password.trim())     return "La contrasena es obligatoria";
-    if (password.length < 6)  return "La contrasena debe tener al menos 6 caracteres";
-    if (!docNumber.trim())    return "El numero de documento es obligatorio";
-    if (!phone.trim())        return "El celular es obligatorio";
-    if (!address.trim())      return "La direccion es obligatoria";
-    if (!city)                return "Selecciona una ciudad";
-    if (!neighborhood)        return "Selecciona un barrio";
-    if (!profilePhoto)        return "La foto de perfil es obligatoria";
-    if (!acceptedTerms)       return "Debes aceptar los terminos y condiciones";
+    if (!firstName.trim())   return "El primer nombre es obligatorio";
+    if (!lastName.trim())    return "El primer apellido es obligatorio";
+    if (!email.trim())       return "El email es obligatorio";
+    if (!password.trim())    return "La contrasena es obligatoria";
+    if (password.length < 6) return "La contrasena debe tener al menos 6 caracteres";
+    if (!docNumber.trim())   return "El numero de documento es obligatorio";
+    if (!phone.trim())       return "El celular es obligatorio";
+    if (!address.trim())     return "La direccion es obligatoria";
+    if (!city)               return "Selecciona una ciudad";
+    if (!neighborhood)       return "Selecciona un barrio";
+    if (!profilePhoto)       return "La foto de perfil es obligatoria";
+    if (!acceptedTerms)      return "Debes aceptar los terminos y condiciones";
     if (isProfessional(role)) {
       if (portfolio.filter(Boolean).length < 3) return "Debes cargar 3 fotos del portafolio";
-      if (!idFront) return "Adjunta la cedula por el frente (foto o PDF)";
-      if (!idBack)  return "Adjunta la cedula por el reverso (foto o PDF)";
+      if (!idFront)              return "Adjunta la cedula por el frente (foto o PDF)";
+      if (!idBack)               return "Adjunta la cedula por el reverso (foto o PDF)";
+      if (!autorizaAntecedentes) return "Debes autorizar la consulta de antecedentes policiales";
       if (role === "quiropodologo" && !diploma) return "El diploma es obligatorio para Quiropodologo";
     }
     return null;
@@ -297,15 +276,18 @@ export default function RegisterScreen() {
         city, neighborhood,
         payment_method: paymentMethod,
         account_number: accountNumber,
-        document_type: docType,
+        document_type:  docType,
         document_number: docNumber,
-        profile_photo: profilePhoto,
+        profile_photo:  profilePhoto,
         portfolio: isProfessional(role) ? portfolio.filter(Boolean) : [],
       };
+
       if (isProfessional(role)) {
-        payload.id_front = idFront;
-        payload.id_back  = idBack;
-        payload.diploma  = diploma || null;
+        payload.id_front         = idFront;
+        payload.id_back          = idBack;
+        payload.diploma          = diploma || null;
+        // ── CAMBIO 3: Incluir antecedentes en el payload ──────────────
+        payload.antecedentes_doc = antecedentesDoc || null;
       }
 
       await api.post("/auth/register", payload);
@@ -315,9 +297,9 @@ export default function RegisterScreen() {
 
       if (isProfessional(role)) {
         Alert.alert(
-          "Registro exitoso",
-          "Tu registro y documentos se encuentran en validacion.\n\nRecibiras una respuesta en las proximas 24 horas.\n\nYa puedes iniciar sesion y explorar la aplicacion.",
-          [{ text: "Iniciar sesion", onPress: () => router.replace("/login") }]
+          "Registro exitoso ✅",
+          "Tu registro y documentos están en revisión.\n\nEl administrador validará tu identidad, antecedentes y diplomas en las próximas 24 horas.\n\nRecibirás una notificación con el resultado.",
+          [{ text: "Entendido", onPress: () => router.replace("/login") }]
         );
       } else {
         Alert.alert("Bienvenido a Style!", "Tu cuenta fue creada exitosamente.", [
@@ -341,21 +323,20 @@ export default function RegisterScreen() {
 
   const PhotoBox = ({ uri, label, onPress }: { uri: string | null; label: string; onPress: () => void }) => (
     <TouchableOpacity onPress={onPress} style={[styles.photoBox, { borderColor: accent }]}>
-      {uri
-        ? <Image source={{ uri }} style={styles.photoImg} />
-        : (
-          <View style={{ alignItems: "center" }}>
-            <Text style={{ color: "#888", textAlign: "center", fontSize: 12 }}>📷 {label}</Text>
-            <Text style={{ color: "#666", fontSize: 10, marginTop: 4 }}>JPG/PNG • max 600KB</Text>
-            <Text style={{ color: "#555", fontSize: 10 }}>Recorta bien para reducir el tamano</Text>
-          </View>
-        )
-      }
+      {uri ? (
+        <Image source={{ uri }} style={styles.photoImg} />
+      ) : (
+        <View style={{ alignItems: "center" }}>
+          <Text style={{ color: "#888", textAlign: "center", fontSize: 12 }}>📷 {label}</Text>
+          <Text style={{ color: "#666", fontSize: 10, marginTop: 4 }}>JPG/PNG • max 600KB</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 
   const DropdownField = ({ show, items, label, onToggle, onSelect }: {
-    show: boolean; items: string[]; label: string; onToggle: () => void; onSelect: (v: string) => void;
+    show: boolean; items: string[]; label: string;
+    onToggle: () => void; onSelect: (v: string) => void;
   }) => (
     <>
       <TouchableOpacity onPress={onToggle} style={[styles.dropBtn, { borderColor: accent }]}>
@@ -376,7 +357,6 @@ export default function RegisterScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, { backgroundColor: "#0d0d0d" }]}>
-      {/* NOMBRE APP */}
       <Text style={[styles.logo, { color: accent }]}>Style</Text>
       <Text style={styles.title}>Registro de usuario</Text>
 
@@ -425,9 +405,9 @@ export default function RegisterScreen() {
 
       {/* DATOS PERSONALES */}
       <Label text="Datos personales" accent={accent} />
-      <Field label="Primer nombre *"    value={firstName}     onChange={(v) => setFirstName(onlyLetters(v))}     accent={accent} />
-      <Field label="Segundo nombre"     value={secondName}    onChange={(v) => setSecondName(onlyLetters(v))}    accent={accent} />
-      <Field label="Primer apellido *"  value={lastName}      onChange={(v) => setLastName(onlyLetters(v))}      accent={accent} />
+      <Field label="Primer nombre *"    value={firstName}      onChange={(v) => setFirstName(onlyLetters(v))}      accent={accent} />
+      <Field label="Segundo nombre"     value={secondName}     onChange={(v) => setSecondName(onlyLetters(v))}     accent={accent} />
+      <Field label="Primer apellido *"  value={lastName}       onChange={(v) => setLastName(onlyLetters(v))}       accent={accent} />
       <Field label="Segundo apellido"   value={secondLastName} onChange={(v) => setSecondLastName(onlyLetters(v))} accent={accent} />
 
       <Label text="Tipo de documento *" accent={accent} />
@@ -441,23 +421,20 @@ export default function RegisterScreen() {
 
       {/* ACCESO */}
       <Label text="Acceso a la cuenta" accent={accent} />
-      <Field label="Email *"            value={email}    onChange={setEmail}    keyboard="email-address" accent={accent} />
-      <Field label="Nombre de usuario"  value={username} onChange={setUsername}                          accent={accent} />
-      <Field label="Contrasena *"       value={password} onChange={setPassword} secure                   accent={accent} />
+      <Field label="Email *"           value={email}    onChange={setEmail}    keyboard="email-address" accent={accent} />
+      <Field label="Nombre de usuario" value={username} onChange={setUsername}                          accent={accent} />
+      <Field label="Contrasena *"      value={password} onChange={setPassword} secure                   accent={accent} />
 
-      {/* DIRECCION CON GPS */}
+      {/* DIRECCION */}
       <Label text="Direccion *" accent={accent} />
       <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
         <TextInput
-          placeholder="Calle, numero y detalles"
-          placeholderTextColor="#555"
-          value={address}
-          onChangeText={setAddress}
+          placeholder="Calle, numero y detalles" placeholderTextColor="#555"
+          value={address} onChangeText={setAddress}
           style={[styles.input, { borderColor: accent + "55", flex: 1, marginBottom: 0 }]}
         />
         <TouchableOpacity
-          onPress={getLocation}
-          disabled={gettingLocation}
+          onPress={getLocation} disabled={gettingLocation}
           style={{
             borderWidth: 1, borderColor: accent, borderRadius: 8,
             paddingHorizontal: 12, justifyContent: "center", alignItems: "center",
@@ -479,29 +456,37 @@ export default function RegisterScreen() {
         items={["Nequi", "PSE", "Efectivo"]}
         label={paymentMethod === "nequi" ? "Nequi" : paymentMethod === "pse" ? "PSE" : "Efectivo"}
         onToggle={() => setShowPayment(!showPayment)}
-        onSelect={(v) => { setPaymentMethod(v === "Nequi" ? "nequi" : v === "PSE" ? "pse" : "efectivo"); setShowPayment(false); }}
+        onSelect={(v) => {
+          setPaymentMethod(v === "Nequi" ? "nequi" : v === "PSE" ? "pse" : "efectivo");
+          setShowPayment(false);
+        }}
       />
-      <Field label="Numero de cuenta / Nequi" value={accountNumber} onChange={(v) => setAccountNumber(v.replace(/\D/g, ""))} keyboard="numeric" accent={accent} />
+      <Field label="Numero de cuenta / Nequi" value={accountNumber}
+        onChange={(v) => setAccountNumber(v.replace(/\D/g, ""))} keyboard="numeric" accent={accent} />
 
-      {/* SECCION PROFESIONALES */}
+      {/* ── SECCIÓN PROFESIONALES ── */}
       {isProfessional(role) && (
         <>
-          {/* AVISO VALIDACION */}
-          <View style={{ backgroundColor: "#1a1a00", borderWidth: 1, borderColor: accent, borderRadius: 10, padding: 14, marginTop: 8, marginBottom: 8 }}>
+          {/* Aviso validación */}
+          <View style={{
+            backgroundColor: "#1a1a00", borderWidth: 1, borderColor: accent,
+            borderRadius: 10, padding: 14, marginTop: 8, marginBottom: 8,
+          }}>
             <Text style={{ color: accent, fontWeight: "900", fontSize: 14, marginBottom: 4 }}>
               Validacion de cuenta profesional
             </Text>
             <Text style={{ color: "#ccc", fontSize: 13, lineHeight: 20 }}>
               Al registrarte, tu perfil y documentos seran revisados por nuestro equipo.{"\n"}
-              Recibiras una respuesta en las proximas <Text style={{ color: accent, fontWeight: "700" }}>24 horas</Text>.{"\n"}
-              Podras iniciar sesion inmediatamente y explorar la app mientras se valida tu cuenta.
+              Recibiras una respuesta en las proximas{" "}
+              <Text style={{ color: accent, fontWeight: "700" }}>24 horas</Text>.{"\n"}
+              Podras iniciar sesion inmediatamente para explorar la app.
             </Text>
           </View>
 
-          {/* PORTAFOLIO */}
+          {/* Portafolio */}
           <Label text={`Portafolio (${portfolio.filter(Boolean).length}/3 fotos) *`} accent={accent} />
           <Text style={{ color: "#888", fontSize: 11, marginBottom: 6 }}>
-            3 fotos de tus trabajos • JPG/PNG • max 600KB cada una • Recorta bien para reducir el tamano
+            3 fotos de tus trabajos • JPG/PNG • max 600KB cada una
           </Text>
           <View style={styles.row}>
             {[0, 1, 2].map((i) => (
@@ -518,42 +503,85 @@ export default function RegisterScreen() {
             ))}
           </View>
 
-          {/* CEDULA FRENTE */}
+          {/* Cédula frente */}
           <DocAttachment
-            label="Cedula - Frente *"
-            uri={idFront}
-            fileName={idFrontName}
+            label="Cedula - Frente *" uri={idFront} fileName={idFrontName}
             onPickImage={() => pickImageOrCamera("Cedula frente", (b64) => { setIdFront(b64); setIdFrontName(""); })}
             onPickDoc={() => pickDocument((b64, name) => { setIdFront(b64); setIdFrontName(name); })}
-            accent={accent}
-            hint="Foto: JPG/PNG max 600KB  |  Documento: PDF max 5MB"
+            accent={accent} hint="Foto: JPG/PNG max 600KB  |  PDF max 5MB"
           />
 
-          {/* CEDULA REVERSO */}
+          {/* Cédula reverso */}
           <DocAttachment
-            label="Cedula - Reverso *"
-            uri={idBack}
-            fileName={idBackName}
+            label="Cedula - Reverso *" uri={idBack} fileName={idBackName}
             onPickImage={() => pickImageOrCamera("Cedula reverso", (b64) => { setIdBack(b64); setIdBackName(""); })}
             onPickDoc={() => pickDocument((b64, name) => { setIdBack(b64); setIdBackName(name); })}
-            accent={accent}
-            hint="Foto: JPG/PNG max 600KB  |  Documento: PDF max 5MB"
+            accent={accent} hint="Foto: JPG/PNG max 600KB  |  PDF max 5MB"
           />
 
-          {/* DIPLOMA */}
+          {/* Diploma */}
           <DocAttachment
             label={`Diploma o Certificado ${role === "quiropodologo" ? "* (obligatorio)" : "(opcional)"}`}
-            uri={diploma}
-            fileName={diplomaName}
+            uri={diploma} fileName={diplomaName}
             onPickImage={() => pickImageOrCamera("Diploma", (b64) => { setDiploma(b64); setDiplomaName(""); })}
             onPickDoc={() => pickDocument((b64, name) => { setDiploma(b64); setDiplomaName(name); })}
-            accent={accent}
-            hint="Foto: JPG/PNG max 600KB  |  Documento: PDF max 5MB"
+            accent={accent} hint="Foto: JPG/PNG max 600KB  |  PDF max 5MB"
           />
+
+          {/* ── CAMBIO 4: Autorización de antecedentes ─────────────────── */}
+          <View style={{
+            backgroundColor: "#0d1b0d", borderWidth: 1,
+            borderColor: "#4caf50", borderRadius: 12,
+            padding: 16, marginTop: 8,
+          }}>
+            <Text style={{ color: "#4caf50", fontWeight: "900", fontSize: 14, marginBottom: 8 }}>
+              🔍 Autorización consulta de antecedentes *
+            </Text>
+            <Text style={{ color: "#ccc", fontSize: 12, lineHeight: 18, marginBottom: 12 }}>
+              El administrador de StyleApp verificará tus antecedentes penales y de policía
+              directamente con las entidades competentes. Para ello necesitamos tu autorización expresa.
+            </Text>
+
+            {/* Checkbox autorización */}
+            <TouchableOpacity
+              onPress={() => setAutorizaAntecedentes(!autorizaAntecedentes)}
+              style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 }}
+            >
+              <View style={{
+                width: 24, height: 24, borderWidth: 2, borderRadius: 4,
+                borderColor: "#4caf50", marginTop: 1,
+                backgroundColor: autorizaAntecedentes ? "#4caf50" : "transparent",
+                alignItems: "center", justifyContent: "center",
+              }}>
+                {autorizaAntecedentes && (
+                  <Text style={{ color: "#000", fontWeight: "900", fontSize: 14 }}>✓</Text>
+                )}
+              </View>
+              <Text style={{ color: "#ccc", flex: 1, lineHeight: 20, fontSize: 13 }}>
+                Autorizo a StyleApp a consultar mis antecedentes penales y de policía
+                ante las entidades competentes como parte del proceso de validación
+                de mi cuenta profesional.
+              </Text>
+            </TouchableOpacity>
+
+            {/* Adjuntar certificado de antecedentes (opcional) */}
+            <Text style={{ color: "#4caf50", fontWeight: "700", fontSize: 12, marginBottom: 6 }}>
+              Certificado de antecedentes (opcional — puedes adjuntarlo si lo tienes)
+            </Text>
+            <DocAttachment
+              label="Certificado antecedentes policiales"
+              uri={antecedentesDoc}
+              fileName={antecedentesName}
+              onPickImage={() => pickImageOrCamera("Antecedentes", (b64) => { setAntecedentesDoc(b64); setAntecedentesName(""); })}
+              onPickDoc={() => pickDocument((b64, name) => { setAntecedentesDoc(b64); setAntecedentesName(name); })}
+              accent="#4caf50"
+              hint="Si ya tienes el certificado puedes adjuntarlo. Si no, el admin lo verificará."
+            />
+          </View>
         </>
       )}
 
-      {/* TERMINOS Y CONDICIONES */}
+      {/* TÉRMINOS Y CONDICIONES */}
       <View style={{ marginTop: 16 }}>
         <TouchableOpacity
           onPress={() => setAcceptedTerms(!acceptedTerms)}
@@ -585,7 +613,7 @@ export default function RegisterScreen() {
         )}
       </View>
 
-      {/* BOTON CREAR CUENTA */}
+      {/* BOTÓN CREAR CUENTA */}
       <TouchableOpacity
         style={[styles.btn, { backgroundColor: accent, opacity: loading ? 0.7 : 1 }]}
         onPress={handleRegister} disabled={loading}
@@ -597,10 +625,13 @@ export default function RegisterScreen() {
         <Text style={[styles.link, { color: accent }]}>Ya tienes cuenta? Inicia sesion</Text>
       </TouchableOpacity>
 
-      {/* MODAL TERMINOS */}
+      {/* MODAL TÉRMINOS */}
       <Modal visible={showTermsModal} transparent animationType="slide">
         <View style={{ flex: 1, backgroundColor: "#000000cc", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: "#111", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: "85%" }}>
+          <View style={{
+            backgroundColor: "#111", borderTopLeftRadius: 20,
+            borderTopRightRadius: 20, padding: 24, maxHeight: "85%",
+          }}>
             <Text style={{ color: accent, fontWeight: "900", fontSize: 20, marginBottom: 16 }}>
               Terminos y Condiciones
             </Text>
@@ -609,34 +640,37 @@ export default function RegisterScreen() {
 Al registrarte en Style aceptas estos terminos de uso.
 
 2. USO DE LA APLICACION
-Style es una plataforma que conecta clientes con profesionales de belleza y cuidado personal (barberos, estilistas y quiropodologos).
+Style es una plataforma que conecta clientes con profesionales de belleza y cuidado personal.
 
 3. REGISTRO
 Debes proporcionar informacion veridica y actualizada. Los profesionales deben adjuntar documentos validos para su validacion.
 
 4. VALIDACION DE PROFESIONALES
-Los perfiles de barberos, estilistas y quiropodologos seran revisados y validados en un plazo de 24 horas. Durante ese tiempo podras usar la app pero no podras recibir servicios hasta ser aprobado.
+Los perfiles de profesionales seran revisados en un plazo de 24 horas. Durante ese tiempo podras explorar la app pero no recibiras servicios hasta ser aprobado.
 
 5. RESPONSABILIDAD
-Style actua como intermediario. La calidad del servicio prestado es responsabilidad exclusiva del profesional.
+Style actua como intermediario. La calidad del servicio es responsabilidad del profesional.
 
 6. PAGOS
-Los pagos se realizan directamente entre cliente y profesional segun el medio de pago acordado al crear el servicio.
+Los pagos se realizan entre cliente y profesional segun el medio acordado.
 
 7. CANCELACIONES
-Las cancelaciones de servicios activos pueden generar un cargo de hasta el 10% del valor del servicio.
+Las cancelaciones de servicios activos generan un cargo del 15% del valor del servicio.
 
 8. CALIFICACIONES
-Ambas partes pueden calificarse mutuamente al finalizar un servicio. Las calificaciones son publicas y afectan la visibilidad del perfil.
+Ambas partes pueden calificarse mutuamente al finalizar un servicio.
 
 9. PRIVACIDAD
-Tus datos personales son tratados conforme a nuestra politica de privacidad y la Ley 1581 de 2012 de proteccion de datos personales de Colombia.
+Tus datos son tratados conforme a la Ley 1581 de 2012 de proteccion de datos de Colombia.
 
 10. DOCUMENTOS
-Los documentos adjuntos (cedula, diploma) son usados unicamente para validar la identidad y formacion del profesional. No seran compartidos con terceros.
+Los documentos adjuntos son usados unicamente para validar identidad y formacion. No seran compartidos con terceros.
 
-11. CONTACTO
-Para soporte escribe a: soporte@styleapp.co`}
+11. ANTECEDENTES
+Para profesionales, autorizas la consulta de antecedentes penales y de policia como parte del proceso de validacion.
+
+12. CONTACTO
+Soporte: soporte@styleapp.co`}
               </Text>
             </ScrollView>
             <TouchableOpacity
@@ -645,7 +679,10 @@ Para soporte escribe a: soporte@styleapp.co`}
             >
               <Text style={{ color: "#000", fontWeight: "900" }}>Aceptar terminos</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowTermsModal(false)} style={{ padding: 12, alignItems: "center" }}>
+            <TouchableOpacity
+              onPress={() => setShowTermsModal(false)}
+              style={{ padding: 12, alignItems: "center" }}
+            >
               <Text style={{ color: "#888" }}>Cerrar</Text>
             </TouchableOpacity>
           </View>
@@ -658,7 +695,9 @@ Para soporte escribe a: soporte@styleapp.co`}
 function Label({ text, accent }: { text: string; accent: string }) {
   return <Text style={[styles.label, { color: accent }]}>{text}</Text>;
 }
-function Chip({ text, active, accent, onPress }: { text: string; active: boolean; accent: string; onPress: () => void }) {
+function Chip({ text, active, accent, onPress }: {
+  text: string; active: boolean; accent: string; onPress: () => void;
+}) {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -699,11 +738,14 @@ const styles = StyleSheet.create({
   btn:          { padding: 15, borderRadius: 10, marginTop: 24, marginBottom: 8 },
   btnText:      { textAlign: "center", fontWeight: "900", color: "#000", fontSize: 16 },
   link:         { textAlign: "center", marginTop: 12, fontWeight: "700" },
-  photoBox:     { borderWidth: 1, borderStyle: "dashed", borderRadius: 10, padding: 14, alignItems: "center", justifyContent: "center", marginBottom: 8, minHeight: 90 },
+  photoBox:     { borderWidth: 1, borderStyle: "dashed", borderRadius: 10, padding: 14,
+                  alignItems: "center", justifyContent: "center", marginBottom: 8, minHeight: 90 },
   photoImg:     { width: "100%", height: 130, borderRadius: 8 },
-  portfolioBox: { flex: 1, borderWidth: 1, borderStyle: "dashed", borderRadius: 8, aspectRatio: 1, alignItems: "center", justifyContent: "center" },
+  portfolioBox: { flex: 1, borderWidth: 1, borderStyle: "dashed", borderRadius: 8,
+                  aspectRatio: 1, alignItems: "center", justifyContent: "center" },
   portfolioImg: { width: "100%", height: "100%", borderRadius: 8 },
-  dropBtn:      { borderWidth: 1, borderRadius: 8, padding: 13, flexDirection: "row", alignItems: "center", marginBottom: 4, backgroundColor: "#141414" },
+  dropBtn:      { borderWidth: 1, borderRadius: 8, padding: 13, flexDirection: "row",
+                  alignItems: "center", marginBottom: 4, backgroundColor: "#141414" },
   dropList:     { borderWidth: 1, borderRadius: 8, backgroundColor: "#1a1a1a", marginBottom: 8 },
   dropItem:     { padding: 13, borderBottomWidth: 1, borderBottomColor: "#2a2a2a" },
 });
