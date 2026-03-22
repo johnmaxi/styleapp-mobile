@@ -593,7 +593,13 @@ export default function ClientStatus() {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => router.replace("/client/home")}
+              onPress={async () => {
+                try {
+                  // Eliminar el servicio expirado de la BD
+                  await api.patch(`/service-requests/${request.id}/status`, { status: "cancelled" });
+                } catch {}
+                router.replace("/client/home");
+              }}
               style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 8, alignItems: "center" }}
             >
               <Text style={{ color: "#888" }}>Cancelar y volver al inicio</Text>
