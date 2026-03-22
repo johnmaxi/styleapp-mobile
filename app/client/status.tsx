@@ -21,7 +21,7 @@ type ServiceRequest = {
   price?: number;
   latitude?: number;
   longitude?: number;
-  status?: "open" | "accepted" | "on_route" | "arrived" | "completed" | "cancelled";
+  status?: "open" | "accepted" | "on_route" | "arrived" | "completed" | "cancelled" | "expired";
   assigned_barber_id?: number;
   barber_name?: string;
   payment_method?: string;
@@ -44,12 +44,13 @@ type TrackingData = {
 };
 
 const STATUS_INFO: Record<string, { text: string; color: string; emoji: string }> = {
-  open:      { text: "Buscando profesional...",  color: "#D4AF37", emoji: "🔍" },
-  accepted:  { text: "Profesional asignado",      color: "#4caf50", emoji: "✅" },
-  on_route:  { text: "Profesional en camino",     color: "#2196F3", emoji: "🚗" },
-  arrived:   { text: "Profesional llegó",         color: "#9C27B0", emoji: "📍" },
-  completed: { text: "Servicio completado",        color: "#4caf50", emoji: "🎉" },
-  cancelled: { text: "Servicio cancelado",         color: "#dd0000", emoji: "❌" },
+  open:      { text: "Buscando profesional...",     color: "#D4AF37", emoji: "🔍" },
+  accepted:  { text: "Profesional asignado",         color: "#4caf50", emoji: "✅" },
+  on_route:  { text: "Profesional en camino",        color: "#2196F3", emoji: "🚗" },
+  arrived:   { text: "Profesional llegó",            color: "#9C27B0", emoji: "📍" },
+  completed: { text: "Servicio completado",           color: "#4caf50", emoji: "🎉" },
+  cancelled: { text: "Servicio cancelado",            color: "#dd0000", emoji: "❌" },
+  expired:   { text: "Sin profesionales disponibles", color: "#FF6B35", emoji: "⏰" },
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -270,6 +271,19 @@ export default function ClientStatus() {
     } catch (err: any) {
       Alert.alert("Error", err?.response?.data?.error || "No se pudo rechazar");
     } finally { setActingBidId(null); }
+  };
+
+  // ── Republicar servicio expirado ─────────────────────────────────────
+  const republishService = async () => {
+    if (!request?.id) return;
+    try {
+      // Cambiar status de expired a open y renovar expires_at
+      await api.patch(`/service-requests/${request.id}/status`, { status: "open" });
+      Alert.alert("✅ Servicio republicado", "Tu solicitud vuelve a estar disponible para los profesionales.");
+      loadStatus();
+    } catch (err: any) {
+      Alert.alert("Error", err?.response?.data?.error || "No se pudo republicar el servicio");
+    }
   };
 
   const cancelService = async () => {
@@ -551,6 +565,41 @@ export default function ClientStatus() {
         <TouchableOpacity onPress={loadStatus} style={{ backgroundColor: palette.primary, padding: 12, borderRadius: 8, alignItems: "center" }}>
           <Text style={{ color: "#000", fontWeight: "700" }}>Actualizar estado</Text>
         </TouchableOpacity>
+
+        {/* ── Servicio expirado — opción de republicar ── */}
+        {request.status === "expired" && (
+          <View style={{
+            backgroundColor: "#1a0d00", borderRadius: 14,
+            padding: 20, borderWidth: 2, borderColor: "#FF6B35", gap: 12,
+          }}>
+            <Text style={{ color: "#FF6B35", fontWeight: "900", fontSize: 16 }}>
+              ⏰ Sin profesionales disponibles
+            </Text>
+            <Text style={{ color: "#aaa", fontSize: 13, lineHeight: 20 }}>
+              Tu solicitud estuvo 10 minutos sin ser aceptada. Puedes republicarla para que los profesionales la vean de nuevo.
+            </Text>
+            <Text style={{ color: "#888", fontSize: 12 }}>
+              💡 Consejo: considera aumentar el precio para atraer más profesionales.
+            </Text>
+            <TouchableOpacity
+              onPress={republishService}
+              style={{
+                backgroundColor: "#FF6B35",
+                padding: 14, borderRadius: 10, alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>
+                🔄 Volver a publicar
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.replace("/client/home")}
+              style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 8, alignItems: "center" }}
+            >
+              <Text style={{ color: "#888" }}>Cancelar y volver al inicio</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {["open", "accepted", "on_route", "arrived"].includes(request.status || "") && (
           <TouchableOpacity onPress={cancelService} style={{ borderWidth: 1, borderColor: "#dd0000", padding: 12, borderRadius: 8, alignItems: "center" }}>
