@@ -11,32 +11,37 @@ export type UserRole =
   | "admin";
 
 export type User = {
-  id: number;
-  email: string;
-  role: UserRole;
-  gender?: "male" | "female";
-  name?: string;
-  profile_photo?: string;
-  rating?: number;
-  phone?: string;
-  address?: string;       // dirección registrada
-  city?: string;
-  neighborhood?: string;
+  id:                  number;
+  email:               string;
+  role:                UserRole;
+  gender?:             "male" | "female";
+  name?:               string;
+  profile_photo?:      string;
+  rating?:             number;
+  phone?:              string;
+  address?:            string;
+  city?:               string;
+  neighborhood?:       string;
+  registration_status?: string;
+};
+
+type LoginResult = {
+  approval_message: string | null;
 };
 
 type AuthContextType = {
-  user: User | null;
-  token: string | null;
+  user:    User | null;
+  token:   string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  login:   (email: string, password: string) => Promise<LoginResult>;
+  logout:  () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser]   = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [user,    setUser]    = useState<User | null>(null);
+  const [token,   setToken]   = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,9 +55,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<LoginResult> => {
     const res = await api.post("/auth/login", { email, password });
-    const { token: newToken, user: newUser } = res.data;
+    const { token: newToken, user: newUser, approval_message } = res.data;
 
     const cleanToken = String(newToken).replace(/\s+/g, "").trim();
 
@@ -61,6 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setToken(cleanToken);
     setUser(newUser);
+
+    return { approval_message: approval_message || null };
   };
 
   const logout = async () => {
