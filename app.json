@@ -51,7 +51,10 @@
         {
           "locationAlwaysAndWhenInUsePermission": "StyleApp necesita tu ubicación para conectarte con clientes cercanos."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
