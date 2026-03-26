@@ -69,6 +69,7 @@ export default function BarberActive() {
   const locationSub   = useRef<Location.LocationSubscription | null>(null);
   const mapRef        = useRef<MapView>(null);
   const clientInfoRef = useRef<ClientInfo | null>(null);
+  const requestRef    = useRef<ServiceRequest | null>(null);
   const lastRouteCalc = useRef<number>(0);
   const lastRoutePos  = useRef<LatLng | null>(null);
 
@@ -78,7 +79,8 @@ export default function BarberActive() {
     let movedEnough = true;
     if (lastPos) {
       const dlat = (from.latitude - lastPos.latitude) * 111000;
-      const dlng = (from.longitude - lastPos.longitude) * 111000 * Math.cos(from.latitude * Math.PI / 180);
+      const dlng = (from.longitude - lastPos.longitude) * 111000 *
+                   Math.cos(from.latitude * Math.PI / 180);
       movedEnough = Math.sqrt(dlat * dlat + dlng * dlng) > 50;
     }
     if (!lastPos || movedEnough || (now - lastRouteCalc.current) > 30000) {
@@ -97,12 +99,16 @@ export default function BarberActive() {
   const loadRequest = useCallback(async () => {
     if (!params.id) return;
     try {
-      for (const path of [`/service-requests/${params.id}`, `/service-request/${params.id}`]) {
+      for (const path of [
+        `/service-requests/${params.id}`,
+        `/service-request/${params.id}`,
+      ]) {
         try {
           const res  = await api.get(path);
           const data = res.data?.data || res.data?.request || res.data;
           if (data?.id) {
             setRequest(data);
+            requestRef.current = data;
             if (data.latitude && data.longitude) {
               setClientCoords({ latitude: data.latitude, longitude: data.longitude });
             }
@@ -128,13 +134,15 @@ export default function BarberActive() {
 
   useEffect(() => {
     if (params.id) {
-      setRequest({
+      const initial: ServiceRequest = {
         id:           Number(params.id),
         service_type: params.service_type,
         address:      params.address,
         price:        params.price ? Number(params.price) : undefined,
         status:       params.status || "accepted",
-      });
+      };
+      setRequest(initial);
+      requestRef.current = initial;
     }
     loadRequest();
     const timer = setInterval(loadRequest, 8000);
@@ -142,10 +150,13 @@ export default function BarberActive() {
   }, [loadRequest]);
 
   useEffect(() => {
-    if (myCoords && clientCoords &&
-        request?.status !== "arrived" && request?.status !== "completed") {
+    if (
+      myCoords && clientCoords &&
+      request?.status !== "arrived" &&
+      request?.status !== "completed"
+    ) {
       updateRoute(
-        { latitude: myCoords.latitude,    longitude: myCoords.longitude },
+        { latitude: myCoords.latitude,     longitude: myCoords.longitude },
         { latitude: clientCoords.latitude, longitude: clientCoords.longitude }
       );
     }
@@ -176,7 +187,9 @@ export default function BarberActive() {
         mapRef.current?.animateToRegion(
           { ...coords, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 300
         );
-        try { await database().ref(`tracking/service_${params.id}`).set(coords); } catch {}
+        try {
+          await database().ref(`tracking/service_${params.id}`).set(coords);
+        } catch {}
       }
     );
   }, [params.id, trackingActive]);
@@ -193,7 +206,9 @@ export default function BarberActive() {
 
   useEffect(() => {
     const s = request?.status;
-    if ((s === "accepted" || s === "on_route" || s === "arrived") && !trackingActive) startTracking();
+    if ((s === "accepted" || s === "on_route" || s === "arrived") && !trackingActive) {
+      startTracking();
+    }
     if (s === "completed" || s === "cancelled") stopTracking();
   }, [request?.status]);
 
@@ -210,6 +225,40 @@ export default function BarberActive() {
       Alert.alert("Error", err?.response?.data?.error || "No se pudo actualizar el estado");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── FIX: usar requestRef para tener client_id actualizado al calificar ──
+  const goToRating = () => {
+    const current = requestRef.current;
+    const cInfo   = clientInfoRef.current;
+    const reqId   = current?.id || Number(params.id);
+    const cId     = current?.client_id;
+
+    if (!cId) {
+      // Si no tenemos client_id aún, ir directo al inicio
+      router.replace("/barber/home");
+      return;
+    }
+
+    try {
+      setTimeout(() => {
+        try {
+          router.replace({
+            pathname: "/rating" as any,
+            params: {
+              service_request_id: String(reqId),
+              rated_id:           String(cId),
+              rated_name:         cInfo?.name || "el cliente",
+              redirect:           "/barber/home",
+            },
+          });
+        } catch {
+          router.replace("/barber/home");
+        }
+      }, 400);
+    } catch {
+      router.replace("/barber/home");
     }
   };
 
@@ -230,18 +279,10 @@ export default function BarberActive() {
           `Total: $${Number(total).toLocaleString("es-CO")}\n` +
           `Tu pago (85%): $${Number(professional_amt).toLocaleString("es-CO")}\n` +
           `Comisión app (15%): $${Number(commission_amt).toLocaleString("es-CO")}`,
-          [{
-            text: "Calificar cliente",
-            onPress: () => router.replace({
-              pathname: "/rating",
-              params: {
-                service_request_id: String(request.id),
-                rated_id:           String(request.client_id || ""),
-                rated_name:         clientInfoRef.current?.name || "el cliente",
-                redirect:           "/barber/home",
-              },
-            }),
-          }]
+          [
+            { text: "Calificar cliente", onPress: goToRating },
+            { text: "Ir al inicio", onPress: () => router.replace("/barber/home") },
+          ]
         );
       }
     } catch (err: any) {
@@ -249,7 +290,7 @@ export default function BarberActive() {
       if (data?.blocked) {
         Alert.alert(
           "⛔ Pago no confirmado",
-          data.error + `\n\nMonto: $${Number(data.required_amount || 0).toLocaleString("es-CO")} COP`,
+          `${data.error}\n\nMonto: $${Number(data.required_amount || 0).toLocaleString("es-CO")} COP`,
           [{ text: "Entendido", style: "cancel" }]
         );
       } else {
@@ -322,9 +363,11 @@ export default function BarberActive() {
                 ${price.toLocaleString("es-CO")} COP
               </Text>
               <Text style={{ color: "#888", fontSize: 12, marginTop: 8 }}>
-                Al confirmar, se descontará el 15% (${Math.round(price * 0.15).toLocaleString("es-CO")}) como comisión.
+                Al confirmar, se descontará el 15% ($
+                {Math.round(price * 0.15).toLocaleString("es-CO")}) como comisión.
               </Text>
             </View>
+
             <TouchableOpacity
               onPress={() => handleFinalize(true)}
               disabled={loading}
@@ -334,10 +377,12 @@ export default function BarberActive() {
                 ✅ Sí, recibí ${price.toLocaleString("es-CO")} por {PAYMENT_LABELS[method] || method}
               </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               onPress={() => {
                 setPaymentModal(false);
-                Alert.alert("⛔ Servicio bloqueado",
+                Alert.alert(
+                  "⛔ Servicio bloqueado",
                   `No puedes finalizar hasta confirmar que recibiste el pago de $${price.toLocaleString("es-CO")} COP.`,
                   [{ text: "Entendido" }]
                 );
@@ -373,13 +418,13 @@ export default function BarberActive() {
               </Marker>
             )}
             {clientCoords && (
-              <Marker coordinate={clientCoords} title="Cliente" description={request?.address} anchor={{ x: 0.5, y: 1.0 }}>
+              <Marker coordinate={clientCoords} title="Cliente"
+                description={request?.address} anchor={{ x: 0.5, y: 1.0 }}>
                 <DestinationMarker size={44} color="#D4AF37" />
               </Marker>
             )}
           </MapView>
 
-          {/* Badge estado */}
           <View style={{
             position: "absolute", top: 10, left: 10,
             backgroundColor: "#000000bb", borderRadius: 8,
@@ -406,7 +451,6 @@ export default function BarberActive() {
       {/* ── DETALLES ── */}
       <View style={{ padding: 20, gap: 12 }}>
 
-        {/* Info servicio */}
         <View style={{
           backgroundColor: palette.card, padding: 14, borderRadius: 12,
           borderWidth: 1, borderColor: statusInfo.color, gap: 4,
@@ -430,7 +474,6 @@ export default function BarberActive() {
           )}
         </View>
 
-        {/* Cliente */}
         {clientInfo?.name && (
           <View style={{
             backgroundColor: palette.card, padding: 12, borderRadius: 10,
@@ -441,12 +484,14 @@ export default function BarberActive() {
           </View>
         )}
 
-        {/* Chat y llamada */}
         <View style={{ flexDirection: "row", gap: 10 }}>
           <TouchableOpacity
             onPress={() => router.push({
               pathname: "/chat/[serviceRequestId]",
-              params: { serviceRequestId: String(request?.id), otherUserName: clientInfo?.name || "Cliente" },
+              params: {
+                serviceRequestId: String(request?.id),
+                otherUserName:    clientInfo?.name || "Cliente",
+              },
             })}
             style={{
               flex: 1, backgroundColor: "#0d1b2e", padding: 14,
@@ -469,7 +514,6 @@ export default function BarberActive() {
           </TouchableOpacity>
         </View>
 
-        {/* GPS */}
         {!trackingActive && ["accepted", "on_route", "arrived"].includes(request?.status || "") && (
           <TouchableOpacity
             onPress={startTracking}
@@ -480,7 +524,6 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
-        {/* Botones de estado */}
         {request?.status === "accepted" && (
           <TouchableOpacity
             onPress={() => updateStatus("on_route")}
@@ -516,7 +559,11 @@ export default function BarberActive() {
               borderColor: "#4caf50",
             }}
           >
-            <Text style={{ color: "#fff", fontWeight: request?.status === "arrived" ? "900" : "700", fontSize: 16 }}>
+            <Text style={{
+              color: "#fff",
+              fontWeight: request?.status === "arrived" ? "900" : "700",
+              fontSize: 16,
+            }}>
               {loading ? "Finalizando..." : "✅ Finalizar servicio"}
             </Text>
           </TouchableOpacity>
