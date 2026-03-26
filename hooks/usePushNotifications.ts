@@ -7,85 +7,70 @@ import { Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import api from "../api";
 
-// Mostrar notificaciones SIEMPRE — incluso con app abierta en primer plano
+// ── FIX: solo campos válidos en SDK 52/54 ─────────────────────────────────
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert:   true,
-    shouldPlaySound:   true,
-    shouldSetBadge:    true,
-    shouldShowBanner:  true,
-    shouldShowList:    true,
-    priority: Notifications.AndroidNotificationPriority.MAX,
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge:  false,
   }),
 });
 
 export function usePushNotifications(userId?: number, role?: string) {
   const router               = useRouter();
-  const notificationListener = useRef<any>();
-  const responseListener     = useRef<any>();
+  const notificationListener = useRef<any>(null);
+  const responseListener     = useRef<any>(null);
 
   // ── Registrar token push ──────────────────────────────────────────────
   useEffect(() => {
     if (!userId) return;
+    let mounted = true;
 
     const register = async () => {
       try {
-        if (!Device.isDevice) {
-          console.log("Push: solo funciona en dispositivo físico");
-          return;
-        }
+        if (!Device.isDevice) return;
 
         const { status: existing } = await Notifications.getPermissionsAsync();
         let finalStatus = existing;
-
         if (existing !== "granted") {
           const { status } = await Notifications.requestPermissionsAsync();
           finalStatus = status;
         }
+        if (finalStatus !== "granted") return;
 
-        if (finalStatus !== "granted") {
-          console.log("Push: permiso denegado");
-          return;
-        }
-
-        // Canal Android con sonido
+        // ── FIX: crear canales sin campos inexistentes ────────────────
         if (Platform.OS === "android") {
-          // Eliminar canal anterior y recrear para garantizar configuración correcta
-          await Notifications.deleteNotificationChannelAsync("styleapp-notifications").catch(() => {});
-          await Notifications.setNotificationChannelAsync("styleapp-notifications", {
-            name:             "StyleApp — Solicitudes",
+          await Notifications.setNotificationChannelAsync("styleapp-urgent", {
+            name:             "StyleApp Urgente",
             importance:       Notifications.AndroidImportance.MAX,
             vibrationPattern: [0, 300, 200, 300],
-            lightColor:       "#D4AF37",
             sound:            "default",
             enableVibrate:    true,
-            showBadge:        true,
-            bypassDnd:        true,  // pasa por no molestar
           });
-          // Canal adicional para alertas críticas
-          await Notifications.setNotificationChannelAsync("styleapp-urgent", {
-            name:             "StyleApp — Urgente",
-            importance:       Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 500, 200, 500],
+          await Notifications.setNotificationChannelAsync("styleapp-notifications", {
+            name:             "StyleApp",
+            importance:       Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 250, 250],
             sound:            "default",
             enableVibrate:    true,
-            bypassDnd:        true,
           });
         }
 
         const tokenData = await Notifications.getExpoPushTokenAsync({
-          projectId: "927dfa9c-986b-4be2-9145-274583151d55",
+          projectId: "a136cc38-83b5-4328-86ce-8a21b62f65e6",
         });
 
-        await api.post("/notifications/push-token", { token: tokenData.data });
-        console.log("Push token registrado OK");
-
+        if (mounted) {
+          await api.post("/notifications/push-token", { token: tokenData.data });
+          console.log("Push token registrado OK");
+        }
       } catch (err: any) {
-        console.warn("Push token error:", err.message);
+        console.warn("Push token error:", err?.message);
       }
     };
 
     register();
+    return () => { mounted = false; };
   }, [userId]);
 
   // ── Actualizar ubicación del profesional ──────────────────────────────
@@ -94,118 +79,115 @@ export function usePushNotifications(userId?: number, role?: string) {
     if (!userId || !role || !PROF_ROLES.includes(role)) return;
 
     let interval: ReturnType<typeof setInterval>;
+    let mounted = true;
 
     const updateLocation = async () => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status !== "granted") return;
-
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        await api.post("/notifications/update-location", {
-          latitude:  loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        });
+        if (mounted) {
+          await api.post("/notifications/update-location", {
+            latitude:  loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          });
+        }
       } catch {}
     };
 
-    // Actualizar inmediatamente y luego cada 3 minutos
     updateLocation();
     interval = setInterval(updateLocation, 3 * 60 * 1000);
-
-    return () => clearInterval(interval);
+    return () => { mounted = false; clearInterval(interval); };
   }, [userId, role]);
 
-  // ── Manejar toque en notificación ─────────────────────────────────────
+  // ── Manejar notificaciones ────────────────────────────────────────────
   useEffect(() => {
-    // Notificación recibida con app abierta — mostrar Alert con acciones
     notificationListener.current = Notifications.addNotificationReceivedListener(
       (notification) => {
-        const data = notification.request.content.data as any;
+        try {
+          const data = notification.request.content.data as any;
+          if (!data?.type) return;
 
-        if (data?.type === "new_service") {
-          // Mostrar Alert con opciones: Aceptar, Contraoferta, Omitir
-          Alert.alert(
-            `✂️ ${data.service_type || "Nuevo servicio"}`,
-            [
+          if (data.type === "service_warning") {
+            Alert.alert(
+              "⚠️ Tu servicio expirará pronto",
+              "Tu solicitud lleva 7 minutos sin ser aceptada.\n\nExpirará en 3 minutos.\n\n💡 Considera aumentar el precio.",
+              [
+                { text: "Ver solicitud", onPress: () => { setTimeout(() => { try { router.push("/client/home" as any); } catch {} }, 200); } },
+                { text: "OK", style: "cancel" },
+              ]
+            );
+            return;
+          }
+
+          if (data.type === "service_expired") {
+            Alert.alert(
+              "⏰ Servicio sin profesionales",
+              `Tu solicitud expiró.\n¿Deseas republicarla?`,
+              [
+                { text: "Ver opciones", onPress: () => { setTimeout(() => { try { router.push("/client/home" as any); } catch {} }, 200); } },
+                { text: "Cerrar", style: "cancel" },
+              ]
+            );
+            return;
+          }
+
+          if (data.type === "new_service") {
+            const bodyLines = [
               data.service_type || "Servicio",
-              `📍 ${data.address || ""}`,
+              data.address ? `📍 ${data.address}` : null,
               `💰 $${Number(data.price || 0).toLocaleString("es-CO")} COP`,
-              data.distance ? `🚗 ${data.distance} · ${data.eta || ""}` : "",
-            ].filter(Boolean).join("\n"),
-            [
-              {
-                text: "✅ Aceptar",
-                onPress: async () => {
-                  try {
-                    const res = await api.post("/bids/accept-direct", {
-                      service_request_id: Number(data.service_id),
-                    });
-                    if (res.data?.ok) {
-                      router.push({
-                        pathname: "/barber/active",
-                        params: {
-                          id:           String(data.service_id),
-                          service_type: data.service_type || "",
-                          address:      data.address      || "",
-                          price:        String(data.price || 0),
-                          status:       "accepted",
-                        },
-                      });
-                    }
-                  } catch (err: any) {
-                    Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar");
-                  }
+              data.distance ? `🚗 ${data.distance} · ${data.eta || ""}` : null,
+            ].filter(Boolean).join("\n");
+
+            Alert.alert(
+              "✂️ Nuevo servicio disponible",
+              bodyLines,
+              [
+                {
+                  text: "✅ Ver solicitudes",
+                  onPress: () => {
+                    setTimeout(() => { try { router.replace("/barber/jobs"); } catch {} }, 200);
+                  },
                 },
-              },
-              {
-                text: "💬 Contraoferta",
-                onPress: () => {
-                  router.push({
-                    pathname: "/barber/offer",
-                    params: {
-                      requestId:    String(data.service_id),
-                      currentPrice: String(data.price || 0),
-                      serviceType:  data.service_type || "",
-                      address:      data.address      || "",
-                    },
-                  });
-                },
-              },
-              {
-                text: "Omitir",
-                style: "cancel",
-                onPress: () => {
-                  // No hace nada — el servicio sigue visible en solicitudes disponibles
-                  console.log("Notificación omitida, servicio disponible en jobs");
-                },
-              },
-            ],
-            { cancelable: true }
-          );
+                { text: "Omitir", style: "cancel" },
+              ],
+              { cancelable: true }
+            );
+          }
+        } catch (err) {
+          console.warn("Notification listener error:", err);
         }
       }
     );
 
-    // Usuario tocó la notificación desde fuera de la app
     responseListener.current = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const data       = response.notification.request.content.data as any;
-        const actionId   = response.actionIdentifier;
-
-        if (data?.type === "new_service") {
-          if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-            // Tocó la notificación → ir a jobs
-            router.push("/barber/jobs");
-          }
-        }
+        try {
+          const data = response.notification.request.content.data as any;
+          if (!data?.type) return;
+          setTimeout(() => {
+            try {
+              if (data.type === "new_service") {
+                router.replace("/barber/jobs");
+              } else if (data.type === "service_warning" || data.type === "service_expired") {
+                router.replace("/client/home" as any);
+              }
+            } catch {}
+          }, 300);
+        } catch {}
       }
     );
 
     return () => {
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
+      if (notificationListener.current) {
+        Notifications.removeNotificationSubscription(notificationListener.current);
+      }
+      if (responseListener.current) {
+        Notifications.removeNotificationSubscription(responseListener.current);
+      }
     };
   }, []);
 }

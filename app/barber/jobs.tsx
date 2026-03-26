@@ -1,5 +1,6 @@
 // app/barber/jobs.tsx
 import { SERVICE_CATALOG, formatPrice, roleToProType } from "@/constants/services";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -13,39 +14,35 @@ import { playSound } from "@/utils/sounds";
 
 type RequestItem = {
   id: number;
-  service_type?:     string;
+  service_type?:      string;
   professional_type?: string;
-  price?:            number;
-  address?:          string;
-  status?:           string;
-  latitude?:         number;
-  longitude?:        number;
-  payment_method?:   string;
-  expires_at?:       string;
-  // calculados en cliente
-  distance?:         number;
-  eta?:              string;
+  price?:             number;
+  address?:           string;
+  status?:            string;
+  latitude?:          number;
+  longitude?:         number;
+  payment_method?:    string;
+  expires_at?:        string;
 };
 
 type BidStatus = "none" | "pending" | "accepted" | "rejected";
 type MyBidMap  = Record<number, { bidId: number; status: BidStatus; amount: number }>;
 
-// Calcular distancia entre dos puntos (Haversine)
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R    = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a    = Math.sin(dLat/2) * Math.sin(dLat/2) +
-               Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) *
-               Math.sin(dLng/2) * Math.sin(dLng/2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a    = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+               Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+               Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function etaText(km: number): string {
   const min = Math.round((km / 25) * 60);
   if (min < 2)  return "~2 min";
   if (min < 60) return `~${min} min`;
-  return `~${Math.floor(min/60)}h ${min%60}min`;
+  return `~${Math.floor(min / 60)}h ${min % 60}min`;
 }
 
 function distText(km: number): string {
@@ -59,7 +56,6 @@ const PAYMENT_LABELS: Record<string, string> = {
   tarjeta:  "💳 Tarjeta — Precio fijo",
 };
 
-// Métodos con precio fijo — no permiten contraoferta
 const FIXED_PRICE_METHODS = ["pse", "tarjeta"];
 
 export default function Jobs() {
@@ -72,6 +68,8 @@ export default function Jobs() {
   const [isActive,        setIsActive]        = useState(true);
   const [loading,         setLoading]         = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  // ── FIX: declarar myLocation correctamente ────────────────────────────
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const notifiedRejected = useRef<Set<number>>(new Set());
   const notifiedAccepted = useRef<Set<number>>(new Set());
@@ -155,13 +153,11 @@ export default function Jobs() {
 
       const filtered = filterByProType(list);
 
-      // Sonido si llegó solicitud nueva
       if (prevCountRef.current >= 0 && filtered.length > prevCountRef.current) {
         playSound("new_request");
       }
       prevCountRef.current = filtered.length;
 
-      // Notificaciones de cambio de estado de bids
       Object.entries(bidMap).forEach(([reqId, bid]) => {
         const reqIdNum     = Number(reqId);
         const req          = filtered.find((r) => r.id === reqIdNum) || list.find((r) => r.id === reqIdNum);
@@ -191,17 +187,19 @@ export default function Jobs() {
     }
   }, [loadMyBids]);
 
-  // Obtener ubicación del profesional para calcular distancia
+  // ── FIX: obtener ubicación con import estático ────────────────────────
   useEffect(() => {
-    import("expo-location").then((Location) => {
-      Location.getForegroundPermissionsAsync().then(({ status }) => {
+    Location.getForegroundPermissionsAsync()
+      .then(({ status }) => {
         if (status === "granted") {
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-            .then((loc) => setMyLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude }))
-            .catch(() => {});
+          return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         }
-      });
-    });
+        return null;
+      })
+      .then((loc) => {
+        if (loc) setMyLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -303,13 +301,29 @@ export default function Jobs() {
         </View>
       ) : (
         requests.map((item) => {
-          const myBid       = myBidMap[item.id];
-          const bidStatus   = myBid?.status || "none";
-          const alreadySent = bidStatus === "pending" || bidStatus === "accepted";
-          const isRejected  = bidStatus === "rejected";
-          const isPending   = bidStatus === "pending";
-          const badge       = BID_BADGE[bidStatus];
+          const myBid        = myBidMap[item.id];
+          const bidStatus    = myBid?.status || "none";
+          const alreadySent  = bidStatus === "pending" || bidStatus === "accepted";
+          const isRejected   = bidStatus === "rejected";
+          const isPending    = bidStatus === "pending";
+          const badge        = BID_BADGE[bidStatus];
           const isFixedPrice = FIXED_PRICE_METHODS.includes(item.payment_method || "");
+
+          // Calcular distancia si tenemos ubicación
+          let distInfo: string | null = null;
+          if (myLocation && item.latitude && item.longitude) {
+            const km = distanceKm(myLocation.lat, myLocation.lng, item.latitude, item.longitude);
+            distInfo = `🚗 ${distText(km)} · ${etaText(km)} desde tu ubicación`;
+          }
+
+          // Tiempo restante
+          let timeInfo: { text: string; color: string } | null = null;
+          if (item.expires_at) {
+            const remaining = Math.round((new Date(item.expires_at).getTime() - Date.now()) / 60000);
+            if (remaining > 0) {
+              timeInfo = { text: `⏰ Expira en ${remaining} min`, color: remaining <= 3 ? "#dd0000" : "#888" };
+            }
+          }
 
           return (
             <View key={item.id} style={{
@@ -319,7 +333,6 @@ export default function Jobs() {
                          : bidStatus === "pending"  ? "#D4AF37"
                          : "#333",
             }}>
-              {/* Servicio y dirección */}
               <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 15, marginBottom: 4 }}>
                 {item.service_type || "Servicio"}
               </Text>
@@ -330,30 +343,18 @@ export default function Jobs() {
                 💰 {item.price ? formatPrice(item.price) : "Sin precio"}
               </Text>
 
-              {/* Distancia y tiempo estimado */}
-              {myLocation && item.latitude && item.longitude && (() => {
-                const km  = distanceKm(myLocation.lat, myLocation.lng, item.latitude, item.longitude);
-                const eta = etaText(km);
-                const dst = distText(km);
-                return (
-                  <Text style={{ color: "#4a90e2", fontSize: 12, marginBottom: 4 }}>
-                    🚗 {dst} · {eta} desde tu ubicación
-                  </Text>
-                );
-              })()}
+              {distInfo && (
+                <Text style={{ color: "#4a90e2", fontSize: 12, marginBottom: 4 }}>
+                  {distInfo}
+                </Text>
+              )}
 
-              {/* Tiempo restante antes de expirar */}
-              {item.expires_at && (() => {
-                const remaining = Math.round((new Date(item.expires_at).getTime() - Date.now()) / 60000);
-                if (remaining <= 0) return null;
-                return (
-                  <Text style={{ color: remaining <= 3 ? "#dd0000" : "#888", fontSize: 11, marginBottom: 4 }}>
-                    ⏰ Expira en {remaining} min
-                  </Text>
-                );
-              })()}
+              {timeInfo && (
+                <Text style={{ color: timeInfo.color, fontSize: 11, marginBottom: 4 }}>
+                  {timeInfo.text}
+                </Text>
+              )}
 
-              {/* Método de pago */}
               {item.payment_method && (
                 <Text style={{ color: isFixedPrice ? "#D4AF37" : "#888", fontSize: 12, marginBottom: 6 }}>
                   {PAYMENT_LABELS[item.payment_method] || item.payment_method}
@@ -361,7 +362,6 @@ export default function Jobs() {
                 </Text>
               )}
 
-              {/* Badge estado bid */}
               {bidStatus !== "none" && (
                 <View style={{
                   backgroundColor: badge.bg, paddingVertical: 4, paddingHorizontal: 10,
@@ -375,7 +375,6 @@ export default function Jobs() {
                 </View>
               )}
 
-              {/* Botones */}
               {(!alreadySent || isRejected) && (
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
                   <TouchableOpacity
@@ -391,7 +390,6 @@ export default function Jobs() {
                     </Text>
                   </TouchableOpacity>
 
-                  {/* Solo mostrar Contraoferta si NO es precio fijo */}
                   {!isFixedPrice && (
                     <TouchableOpacity
                       onPress={() => handleCounterOffer(item)}

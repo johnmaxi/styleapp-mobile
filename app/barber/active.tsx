@@ -1,37 +1,40 @@
-// app/barber/active.tsx — con lógica de confirmación de pago por método
+// app/barber/active.tsx
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { getRouteCoords, LatLng } from "@/utils/directions";
 import { getPalette } from "@/utils/palette";
+import { ClipperMarker, DestinationMarker } from "@/utils/mapMarkers";
 import database from "@react-native-firebase/database";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert, Linking, Modal, ScrollView,
-  Text, TouchableOpacity, View
+  Text, TouchableOpacity, View,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
-import { ClipperMarker, DestinationMarker } from "@/utils/mapMarkers";
 
 type ServiceRequest = {
   id: number;
-  service_type?: string;
-  address?: string;
-  price?: number;
-  status?: string;
-  client_id?: number;
+  service_type?:       string;
+  address?:            string;
+  price?:              number;
+  status?:             string;
+  client_id?:          number;
   assigned_barber_id?: number;
-  payment_method?: string;
-  latitude?: number;
-  longitude?: number;
+  payment_method?:     string;
+  latitude?:           number;
+  longitude?:          number;
 };
 
 type ClientInfo = { id: number; name?: string; phone?: string };
 type GPSCoords  = { latitude: number; longitude: number; heading?: number; updated_at?: number };
 
 const PAYMENT_LABELS: Record<string, string> = {
-  efectivo: "Efectivo", pse: "PSE", nequi: "Nequi", daviplata: "Daviplata", tarjeta: "Tarjeta",
+  efectivo: "Efectivo",
+  pse:      "PSE",
+  nequi:    "Nequi",
+  tarjeta:  "Tarjeta",
 };
 
 const STATUS_INFO: Record<string, { label: string; color: string }> = {
@@ -42,8 +45,7 @@ const STATUS_INFO: Record<string, { label: string; color: string }> = {
   cancelled: { label: "Servicio cancelado",   color: "#dd0000" },
 };
 
-// Métodos que requieren confirmación manual de pago
-const REQUIRES_CASH_CONFIRM = ["efectivo", "nequi", "daviplata"];
+const REQUIRES_CASH_CONFIRM = ["efectivo", "nequi"];
 
 export default function BarberActive() {
   const router   = useRouter();
@@ -54,17 +56,15 @@ export default function BarberActive() {
     price?: string; status?: string;
   }>();
 
-  const [request, setRequest]               = useState<ServiceRequest | null>(null);
-  const [clientInfo, setClientInfo]         = useState<ClientInfo | null>(null);
-  const [loading, setLoading]               = useState(false);
-  const [myCoords, setMyCoords]             = useState<GPSCoords | null>(null);
-  const [clientCoords, setClientCoords]     = useState<GPSCoords | null>(null);
+  const [request,        setRequest]        = useState<ServiceRequest | null>(null);
+  const [clientInfo,     setClientInfo]     = useState<ClientInfo | null>(null);
+  const [loading,        setLoading]        = useState(false);
+  const [myCoords,       setMyCoords]       = useState<GPSCoords | null>(null);
+  const [clientCoords,   setClientCoords]   = useState<GPSCoords | null>(null);
   const [trackingActive, setTrackingActive] = useState(false);
-  const [routeCoords, setRouteCoords]       = useState<LatLng[]>([]);
-  const [loadingRoute, setLoadingRoute]     = useState(false);
-
-  // Modal de confirmación de pago
-  const [paymentModal, setPaymentModal]     = useState(false);
+  const [routeCoords,    setRouteCoords]    = useState<LatLng[]>([]);
+  const [loadingRoute,   setLoadingRoute]   = useState(false);
+  const [paymentModal,   setPaymentModal]   = useState(false);
 
   const locationSub   = useRef<Location.LocationSubscription | null>(null);
   const mapRef        = useRef<MapView>(null);
@@ -73,7 +73,7 @@ export default function BarberActive() {
   const lastRoutePos  = useRef<LatLng | null>(null);
 
   const updateRoute = useCallback(async (from: LatLng, to: LatLng) => {
-    const now = Date.now();
+    const now     = Date.now();
     const lastPos = lastRoutePos.current;
     let movedEnough = true;
     if (lastPos) {
@@ -103,8 +103,9 @@ export default function BarberActive() {
           const data = res.data?.data || res.data?.request || res.data;
           if (data?.id) {
             setRequest(data);
-            if (data.latitude && data.longitude)
+            if (data.latitude && data.longitude) {
               setClientCoords({ latitude: data.latitude, longitude: data.longitude });
+            }
             if (data.client_id && !clientInfoRef.current) {
               try {
                 const cr    = await api.get(`/usuarios/me/${data.client_id}`);
@@ -128,9 +129,11 @@ export default function BarberActive() {
   useEffect(() => {
     if (params.id) {
       setRequest({
-        id: Number(params.id), service_type: params.service_type,
-        address: params.address, price: params.price ? Number(params.price) : undefined,
-        status: params.status || "accepted",
+        id:           Number(params.id),
+        service_type: params.service_type,
+        address:      params.address,
+        price:        params.price ? Number(params.price) : undefined,
+        status:       params.status || "accepted",
       });
     }
     loadRequest();
@@ -139,18 +142,23 @@ export default function BarberActive() {
   }, [loadRequest]);
 
   useEffect(() => {
-    if (myCoords && clientCoords && request?.status !== "arrived" && request?.status !== "completed")
-      updateRoute({ latitude: myCoords.latitude, longitude: myCoords.longitude },
-                  { latitude: clientCoords.latitude, longitude: clientCoords.longitude });
-    if (request?.status === "arrived" || request?.status === "completed")
+    if (myCoords && clientCoords &&
+        request?.status !== "arrived" && request?.status !== "completed") {
+      updateRoute(
+        { latitude: myCoords.latitude,    longitude: myCoords.longitude },
+        { latitude: clientCoords.latitude, longitude: clientCoords.longitude }
+      );
+    }
+    if (request?.status === "arrived" || request?.status === "completed") {
       setRouteCoords([]);
+    }
   }, [myCoords, clientCoords, request?.status]);
 
   const startTracking = useCallback(async () => {
     if (trackingActive || !params.id) return;
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permiso requerido", "Activa la ubicación en Ajustes > Permisos.");
+      Alert.alert("Permiso requerido", "Activa la ubicación en Ajustes.");
       return;
     }
     await Location.requestBackgroundPermissionsAsync().catch(() => {});
@@ -159,11 +167,15 @@ export default function BarberActive() {
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 3000, distanceInterval: 5 },
       async (loc) => {
         const coords: GPSCoords = {
-          latitude: loc.coords.latitude, longitude: loc.coords.longitude,
-          heading: loc.coords.heading ?? 0, updated_at: Date.now(),
+          latitude:   loc.coords.latitude,
+          longitude:  loc.coords.longitude,
+          heading:    loc.coords.heading ?? 0,
+          updated_at: Date.now(),
         };
         setMyCoords(coords);
-        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 300);
+        mapRef.current?.animateToRegion(
+          { ...coords, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 300
+        );
         try { await database().ref(`tracking/service_${params.id}`).set(coords); } catch {}
       }
     );
@@ -187,7 +199,6 @@ export default function BarberActive() {
 
   useEffect(() => { return () => { stopTracking(); }; }, []);
 
-  // ── Actualizar estado simple (sin lógica de pago) ─────────────────────
   const updateStatus = async (newStatus: string) => {
     if (!request?.id) return;
     setLoading(true);
@@ -202,7 +213,6 @@ export default function BarberActive() {
     }
   };
 
-  // ── Finalizar con lógica de pago ──────────────────────────────────────
   const handleFinalize = async (paymentConfirmed: boolean) => {
     if (!request?.id) return;
     setLoading(true);
@@ -211,14 +221,13 @@ export default function BarberActive() {
       const res = await api.post(`/payments/finalize-service/${request.id}`, {
         payment_confirmed: paymentConfirmed,
       });
-
       if (res.data.ok) {
         await stopTracking();
         const { total, professional_amt, commission_amt, payment_method } = res.data.breakdown;
         Alert.alert(
           "✅ Servicio finalizado",
           `Pago: ${PAYMENT_LABELS[payment_method] || payment_method}\n` +
-          `Total servicio: $${Number(total).toLocaleString("es-CO")}\n` +
+          `Total: $${Number(total).toLocaleString("es-CO")}\n` +
           `Tu pago (85%): $${Number(professional_amt).toLocaleString("es-CO")}\n` +
           `Comisión app (15%): $${Number(commission_amt).toLocaleString("es-CO")}`,
           [{
@@ -240,7 +249,7 @@ export default function BarberActive() {
       if (data?.blocked) {
         Alert.alert(
           "⛔ Pago no confirmado",
-          data.error + `\n\nMonto requerido: $${Number(data.required_amount || 0).toLocaleString("es-CO")} COP`,
+          data.error + `\n\nMonto: $${Number(data.required_amount || 0).toLocaleString("es-CO")} COP`,
           [{ text: "Entendido", style: "cancel" }]
         );
       } else {
@@ -251,7 +260,6 @@ export default function BarberActive() {
     }
   };
 
-  // ── Confirmar llegada ─────────────────────────────────────────────────
   const confirmArrived = () => {
     Alert.alert(
       "¿Llegaste al destino?",
@@ -263,16 +271,11 @@ export default function BarberActive() {
     );
   };
 
-  // ── Mostrar modal o finalizar directo según método de pago ────────────
   const confirmComplete = () => {
     const method = request?.payment_method || "";
-    const price  = request?.price ?? 0;
-
     if (REQUIRES_CASH_CONFIRM.includes(method)) {
-      // Mostrar modal de confirmación de pago
       setPaymentModal(true);
     } else {
-      // PSE o tarjeta — finalizar directo (el pago ya fue procesado)
       Alert.alert(
         "Finalizar servicio",
         "¿Confirmas que el servicio fue completado?",
@@ -284,25 +287,24 @@ export default function BarberActive() {
     }
   };
 
-  const price = request?.price ?? Number(params.price ?? 0);
-  const method = request?.payment_method || "";
+  const price      = request?.price ?? Number(params.price ?? 0);
+  const method     = request?.payment_method || "";
   const statusInfo = STATUS_INFO[request?.status || "accepted"] || STATUS_INFO.accepted;
-  const mapRegion = myCoords
+  const mapRegion  = myCoords
     ? { ...myCoords, latitudeDelta: 0.015, longitudeDelta: 0.015 }
-    : clientCoords ? { ...clientCoords, latitudeDelta: 0.015, longitudeDelta: 0.015 } : null;
+    : clientCoords
+    ? { ...clientCoords, latitudeDelta: 0.015, longitudeDelta: 0.015 }
+    : null;
 
   return (
     <ScrollView contentContainerStyle={{ backgroundColor: palette.background, paddingBottom: 40 }}>
 
       {/* ── MODAL CONFIRMACIÓN DE PAGO ── */}
       <Modal visible={paymentModal} transparent animationType="slide">
-        <View style={{
-          flex: 1, justifyContent: "flex-end",
-          backgroundColor: "#00000099",
-        }}>
+        <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#00000099" }}>
           <View style={{
-            backgroundColor: "#1a1a1a", borderTopLeftRadius: 20, borderTopRightRadius: 20,
-            padding: 28, gap: 16,
+            backgroundColor: "#1a1a1a", borderTopLeftRadius: 20,
+            borderTopRightRadius: 20, padding: 28, gap: 16,
           }}>
             <Text style={{ color: "#fff", fontWeight: "900", fontSize: 20, textAlign: "center" }}>
               Confirmar pago recibido
@@ -315,40 +317,28 @@ export default function BarberActive() {
               <Text style={{ color: "#D4AF37", fontWeight: "700", fontSize: 16 }}>
                 {PAYMENT_LABELS[method] || method}
               </Text>
-              <Text style={{ color: "#aaa", fontSize: 13, marginTop: 8 }}>Monto total del servicio</Text>
+              <Text style={{ color: "#aaa", fontSize: 13, marginTop: 8 }}>Monto total</Text>
               <Text style={{ color: "#fff", fontWeight: "900", fontSize: 28 }}>
                 ${price.toLocaleString("es-CO")} COP
               </Text>
-              {method === "nequi" || method === "daviplata" ? (
-                <Text style={{ color: "#888", fontSize: 12, marginTop: 8 }}>
-                  Al confirmar, se descontará el 15% (${Math.round(price * 0.15).toLocaleString("es-CO")}) de tu saldo como comisión.
-                </Text>
-              ) : (
-                <Text style={{ color: "#888", fontSize: 12, marginTop: 8 }}>
-                  Al confirmar, se descontará el 15% (${Math.round(price * 0.15).toLocaleString("es-CO")}) del saldo del cliente como comisión.
-                </Text>
-              )}
+              <Text style={{ color: "#888", fontSize: 12, marginTop: 8 }}>
+                Al confirmar, se descontará el 15% (${Math.round(price * 0.15).toLocaleString("es-CO")}) como comisión.
+              </Text>
             </View>
-
             <TouchableOpacity
               onPress={() => handleFinalize(true)}
               disabled={loading}
-              style={{
-                backgroundColor: "#0A7E07", padding: 16, borderRadius: 12,
-                alignItems: "center",
-              }}
+              style={{ backgroundColor: "#0A7E07", padding: 16, borderRadius: 12, alignItems: "center" }}
             >
               <Text style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}>
                 ✅ Sí, recibí ${price.toLocaleString("es-CO")} por {PAYMENT_LABELS[method] || method}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               onPress={() => {
                 setPaymentModal(false);
-                Alert.alert(
-                  "⛔ Servicio bloqueado",
-                  `No puedes finalizar el servicio hasta confirmar que recibiste el pago de $${price.toLocaleString("es-CO")} COP.`,
+                Alert.alert("⛔ Servicio bloqueado",
+                  `No puedes finalizar hasta confirmar que recibiste el pago de $${price.toLocaleString("es-CO")} COP.`,
                   [{ text: "Entendido" }]
                 );
               }}
@@ -358,27 +348,24 @@ export default function BarberActive() {
               }}
             >
               <Text style={{ color: "#EF4444", fontWeight: "700", fontSize: 15 }}>
-                ❌ No, aún no recibí el pago
+                ❌ No he recibido el pago
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setPaymentModal(false)}>
-              <Text style={{ color: "#666", textAlign: "center", fontSize: 13 }}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
       {/* ── MAPA ── */}
-      <View style={{ height: 320, backgroundColor: "#111" }}>
-        {mapRegion ? (
+      {mapRegion && (
+        <View style={{ height: 260, position: "relative" }}>
           <MapView
-            ref={mapRef} provider={PROVIDER_GOOGLE}
-            style={{ flex: 1 }} initialRegion={mapRegion}
-            showsUserLocation={false} showsTraffic={false}
+            ref={mapRef}
+            provider={PROVIDER_GOOGLE}
+            style={{ flex: 1 }}
+            initialRegion={mapRegion}
           >
             {routeCoords.length > 1 && (
-              <Polyline coordinates={routeCoords} strokeColor="#2196F3" strokeWidth={4} geodesic={true} />
+              <Polyline coordinates={routeCoords} strokeColor="#2196F3" strokeWidth={4} geodesic />
             )}
             {myCoords && (
               <Marker coordinate={myCoords} title="Tu ubicación" anchor={{ x: 0.5, y: 0.5 }}>
@@ -386,113 +373,75 @@ export default function BarberActive() {
               </Marker>
             )}
             {clientCoords && (
-              <Marker coordinate={clientCoords} title={clientInfo?.name || "Destino"}
-                description={request?.address} anchor={{ x: 0.5, y: 1.0 }}>
+              <Marker coordinate={clientCoords} title="Cliente" description={request?.address} anchor={{ x: 0.5, y: 1.0 }}>
                 <DestinationMarker size={44} color="#D4AF37" />
               </Marker>
             )}
           </MapView>
-        ) : (
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-            <Text style={{ color: "#555" }}>Cargando mapa...</Text>
-          </View>
-        )}
 
-        {/* Badge GPS */}
-        <View style={{
-          position: "absolute", top: 10, left: 10,
-          backgroundColor: trackingActive ? "#0a2a0acc" : "#1a1a1acc",
-          borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
-          borderWidth: 1, borderColor: trackingActive ? "#4caf50" : "#444",
-          flexDirection: "row", alignItems: "center", gap: 6,
-        }}>
-          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: trackingActive ? "#4caf50" : "#555" }} />
-          <Text style={{ color: trackingActive ? "#4caf50" : "#888", fontSize: 11 }}>
-            {trackingActive ? "GPS activo" : "GPS inactivo"}
-          </Text>
-        </View>
-
-        {routeCoords.length > 1 && (
+          {/* Badge estado */}
           <View style={{
-            position: "absolute", top: 10, right: 10, backgroundColor: "#00000099",
-            borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
-            borderWidth: 1, borderColor: "#2196F355",
-            flexDirection: "row", alignItems: "center", gap: 6,
+            position: "absolute", top: 10, left: 10,
+            backgroundColor: "#000000bb", borderRadius: 8,
+            paddingHorizontal: 10, paddingVertical: 6,
+            borderWidth: 1, borderColor: statusInfo.color,
           }}>
-            <View style={{ width: 16, height: 3, backgroundColor: "#2196F3", borderRadius: 2 }} />
-            <Text style={{ color: "#2196F3", fontSize: 11 }}>
-              {loadingRoute ? "Actualizando..." : "Ruta activa"}
+            <Text style={{ color: statusInfo.color, fontSize: 12, fontWeight: "700" }}>
+              {statusInfo.label}
             </Text>
           </View>
-        )}
 
-        <TouchableOpacity
-          onPress={() => {
-            if (myCoords && clientCoords && mapRef.current) {
-              mapRef.current.fitToCoordinates(
-                [{ latitude: myCoords.latitude, longitude: myCoords.longitude },
-                 { latitude: clientCoords.latitude, longitude: clientCoords.longitude }],
-                { edgePadding: { top: 60, right: 40, bottom: 40, left: 40 }, animated: true }
-              );
-            }
-          }}
-          style={{
-            position: "absolute", bottom: 12, right: 12,
-            backgroundColor: "#000000cc", borderRadius: 8, padding: 10,
-            borderWidth: 1, borderColor: "#444",
-          }}
-        >
-          <Text style={{ color: "#fff", fontSize: 18 }}>⊕</Text>
-        </TouchableOpacity>
-      </View>
+          {loadingRoute && (
+            <View style={{
+              position: "absolute", top: 10, right: 10,
+              backgroundColor: "#000000bb", borderRadius: 8,
+              paddingHorizontal: 10, paddingVertical: 6,
+            }}>
+              <Text style={{ color: "#2196F3", fontSize: 11 }}>Calculando ruta...</Text>
+            </View>
+          )}
+        </View>
+      )}
 
-      <View style={{ padding: 16, gap: 12 }}>
-        <Text style={{ fontSize: 20, fontWeight: "700", color: palette.text }}>Servicio activo</Text>
+      {/* ── DETALLES ── */}
+      <View style={{ padding: 20, gap: 12 }}>
 
-        {/* STATUS */}
+        {/* Info servicio */}
         <View style={{
           backgroundColor: palette.card, padding: 14, borderRadius: 12,
-          borderWidth: 2, borderColor: statusInfo.color,
+          borderWidth: 1, borderColor: statusInfo.color, gap: 4,
         }}>
           <Text style={{ color: statusInfo.color, fontWeight: "900", fontSize: 16 }}>
             {statusInfo.label}
           </Text>
-          <Text style={{ color: "#aaa", fontSize: 12, marginTop: 2 }}>Solicitud #{request?.id}</Text>
-        </View>
-
-        {/* DETALLES */}
-        <View style={{ backgroundColor: palette.card, padding: 14, borderRadius: 10, gap: 5 }}>
           <Text style={{ color: palette.text }}>
-            Servicio: {request?.service_type || params.service_type || "-"}
+            {request?.service_type || params.service_type || "Servicio"}
           </Text>
-          <Text style={{ color: palette.text }}>
-            Dirección: {request?.address || params.address || "-"}
+          <Text style={{ color: "#aaa", fontSize: 13 }}>
+            📍 {request?.address || params.address || "Sin dirección"}
           </Text>
-          <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 16 }}>
-            Valor: ${price.toLocaleString("es-CO")} COP
+          <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 18 }}>
+            ${price.toLocaleString("es-CO")} COP
           </Text>
-          {request?.payment_method && (
-            <View style={{
-              flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4,
-              backgroundColor: "#0d1b2e", borderRadius: 8, padding: 8,
-              borderWidth: 1, borderColor: "#D4AF3755",
-            }}>
-              <Text style={{ fontSize: 16 }}>
-                {method === "efectivo" ? "💵" : method === "nequi" ? "📱" :
-                 method === "pse" ? "🏦" : method === "tarjeta" ? "💳" : "💰"}
-              </Text>
-              <Text style={{ color: "#D4AF37", fontWeight: "700" }}>
-                {PAYMENT_LABELS[method] || method}
-              </Text>
-              {REQUIRES_CASH_CONFIRM.includes(method) && (
-                <Text style={{ color: "#888", fontSize: 11 }}>— requiere confirmación</Text>
-              )}
-            </View>
+          {method && (
+            <Text style={{ color: "#888", fontSize: 13 }}>
+              💳 {PAYMENT_LABELS[method] || method}
+            </Text>
           )}
-          {clientInfo?.name && <Text style={{ color: "#ccc" }}>Cliente: {clientInfo.name}</Text>}
         </View>
 
-        {/* CHAT Y LLAMADA */}
+        {/* Cliente */}
+        {clientInfo?.name && (
+          <View style={{
+            backgroundColor: palette.card, padding: 12, borderRadius: 10,
+            borderWidth: 1, borderColor: "#333",
+          }}>
+            <Text style={{ color: "#888", fontSize: 12 }}>Cliente</Text>
+            <Text style={{ color: palette.text, fontWeight: "700" }}>{clientInfo.name}</Text>
+          </View>
+        )}
+
+        {/* Chat y llamada */}
         <View style={{ flexDirection: "row", gap: 10 }}>
           <TouchableOpacity
             onPress={() => router.push({
@@ -520,18 +469,24 @@ export default function BarberActive() {
           </TouchableOpacity>
         </View>
 
-        {!trackingActive && ["accepted","on_route","arrived"].includes(request?.status || "") && (
-          <TouchableOpacity onPress={startTracking} style={{
-            backgroundColor: "#1a1a1a", padding: 12, borderRadius: 10,
-            alignItems: "center", borderWidth: 1, borderColor: "#888",
-          }}>
+        {/* GPS */}
+        {!trackingActive && ["accepted", "on_route", "arrived"].includes(request?.status || "") && (
+          <TouchableOpacity
+            onPress={startTracking}
+            style={{ backgroundColor: "#1a1a1a", padding: 12, borderRadius: 10,
+              alignItems: "center", borderWidth: 1, borderColor: "#888" }}
+          >
             <Text style={{ color: "#aaa", fontWeight: "700" }}>📍 Activar GPS</Text>
           </TouchableOpacity>
         )}
 
+        {/* Botones de estado */}
         {request?.status === "accepted" && (
-          <TouchableOpacity onPress={() => updateStatus("on_route")} disabled={loading}
-            style={{ backgroundColor: "#1f4eb5", padding: 14, borderRadius: 10, alignItems: "center" }}>
+          <TouchableOpacity
+            onPress={() => updateStatus("on_route")}
+            disabled={loading}
+            style={{ backgroundColor: "#1f4eb5", padding: 14, borderRadius: 10, alignItems: "center" }}
+          >
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
               {loading ? "Actualizando..." : "🚗 Estoy en camino"}
             </Text>
@@ -539,8 +494,11 @@ export default function BarberActive() {
         )}
 
         {request?.status === "on_route" && (
-          <TouchableOpacity onPress={confirmArrived} disabled={loading}
-            style={{ backgroundColor: "#6a1fb5", padding: 14, borderRadius: 10, alignItems: "center" }}>
+          <TouchableOpacity
+            onPress={confirmArrived}
+            disabled={loading}
+            style={{ backgroundColor: "#6a1fb5", padding: 14, borderRadius: 10, alignItems: "center" }}
+          >
             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
               {loading ? "Actualizando..." : "📍 Llegué al destino"}
             </Text>
@@ -548,21 +506,26 @@ export default function BarberActive() {
         )}
 
         {(request?.status === "arrived" || request?.status === "on_route") && (
-          <TouchableOpacity onPress={confirmComplete} disabled={loading}
+          <TouchableOpacity
+            onPress={confirmComplete}
+            disabled={loading}
             style={{
               backgroundColor: request?.status === "arrived" ? "#0A7E07" : "transparent",
               padding: 14, borderRadius: 10, alignItems: "center",
               borderWidth: request?.status === "on_route" ? 1 : 0,
               borderColor: "#4caf50",
-            }}>
+            }}
+          >
             <Text style={{ color: "#fff", fontWeight: request?.status === "arrived" ? "900" : "700", fontSize: 16 }}>
               {loading ? "Finalizando..." : "✅ Finalizar servicio"}
             </Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity onPress={() => router.replace("/barber/home")}
-          style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 10, alignItems: "center" }}>
+        <TouchableOpacity
+          onPress={() => router.replace("/barber/home")}
+          style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 10, alignItems: "center" }}
+        >
           <Text style={{ color: "#aaa" }}>Volver al inicio</Text>
         </TouchableOpacity>
       </View>
