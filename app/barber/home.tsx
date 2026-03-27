@@ -153,10 +153,14 @@ export default function BarberHome() {
       { text: "Cancelar", style: "cancel" },
       {
         text: "Salir", style: "destructive",
-        onPress: async () => {
-          await logout();           // limpia storage
-          router.replace("/login"); // navega ANTES de limpiar state
-          setTimeout(() => clearSession(), 500); // limpia state después
+        onPress: () => {
+          // 1. Navegar primero — antes de tocar cualquier state
+          router.replace("/login");
+          // 2. Limpiar storage y state después de navegar
+          setTimeout(async () => {
+            await logout();
+            clearSession();
+          }, 300);
         },
       },
     ]);

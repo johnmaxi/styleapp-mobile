@@ -278,6 +278,11 @@ export default function BarberActive() {
       if (res.data.ok) {
         await stopTracking();
         const { total, professional_amt, commission_amt, payment_method } = res.data.breakdown;
+        // Usar client_id de la respuesta del servidor (más confiable que requestRef)
+        const finalClientId   = res.data.client_id || requestRef.current?.client_id || null;
+        const finalClientName = clientInfoRef.current?.name || "el cliente";
+        const finalServiceId  = request.id;
+
         Alert.alert(
           "✅ Servicio finalizado",
           `Pago: ${PAYMENT_LABELS[payment_method] || payment_method}\n` +
@@ -285,8 +290,34 @@ export default function BarberActive() {
           `Tu pago (85%): $${Number(professional_amt).toLocaleString("es-CO")}\n` +
           `Comisión app (15%): $${Number(commission_amt).toLocaleString("es-CO")}`,
           [
-            { text: "Calificar cliente", onPress: goToRating },
-            { text: "Ir al inicio", onPress: () => router.replace("/barber/home") },
+            {
+              text: "Calificar cliente",
+              onPress: () => {
+                if (!finalClientId) {
+                  setTimeout(() => router.replace("/barber/home"), 200);
+                  return;
+                }
+                setTimeout(() => {
+                  try {
+                    router.replace({
+                      pathname: "/rating" as any,
+                      params: {
+                        service_request_id: String(finalServiceId),
+                        rated_id:           String(finalClientId),
+                        rated_name:         finalClientName,
+                        redirect:           "/barber/home",
+                      },
+                    });
+                  } catch {
+                    router.replace("/barber/home");
+                  }
+                }, 400);
+              },
+            },
+            {
+              text: "Ir al inicio",
+              onPress: () => setTimeout(() => router.replace("/barber/home"), 200),
+            },
           ]
         );
       }
