@@ -29,7 +29,9 @@
         "VIBRATE",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -62,9 +64,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a136cc38-83b5-4328-86ce-8a21b62f65e6"
+        "projectId": "ef285a1f-3834-4eeb-9551-e19e734a86c4"
       }
     },
-    "owner": "styleapp10"
+    "owner": "johnlop"
   }
 }
