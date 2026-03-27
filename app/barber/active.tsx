@@ -574,6 +574,40 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
+        {/* Cancelar servicio por profesional */}
+        {(request?.status === "accepted" || request?.status === "on_route") && (
+          <TouchableOpacity
+            onPress={() => {
+              Alert.alert(
+                "⚠️ Cancelar servicio",
+                `Al cancelar un servicio aceptado se descontará el 15% ($${Math.round(price * 0.15).toLocaleString("es-CO")}) de tu saldo como penalización.\n\n¿Confirmas la cancelación?`,
+                [
+                  { text: "No, continuar", style: "cancel" },
+                  {
+                    text: "Sí, cancelar",
+                    style: "destructive",
+                    onPress: async () => {
+                      try {
+                        const res = await api.post(`/payments/cancel-service-professional/${request?.id}`);
+                        Alert.alert(
+                          "Servicio cancelado",
+                          res.data?.message || "El servicio fue cancelado.",
+                          [{ text: "OK", onPress: () => router.replace("/barber/home") }]
+                        );
+                      } catch (err: any) {
+                        Alert.alert("Error", err?.response?.data?.error || "No se pudo cancelar");
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            style={{ borderWidth: 1, borderColor: "#dd0000", padding: 12, borderRadius: 10, alignItems: "center" }}
+          >
+            <Text style={{ color: "#dd0000" }}>Cancelar servicio</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           onPress={() => router.replace("/barber/home")}
           style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 10, alignItems: "center" }}

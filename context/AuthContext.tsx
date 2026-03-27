@@ -30,11 +30,12 @@ type LoginResult = {
 };
 
 type AuthContextType = {
-  user:    User | null;
-  token:   string | null;
-  loading: boolean;
-  login:   (email: string, password: string) => Promise<LoginResult>;
-  logout:  () => Promise<void>;
+  user:         User | null;
+  token:        string | null;
+  loading:      boolean;
+  login:        (email: string, password: string) => Promise<LoginResult>;
+  logout:       () => Promise<void>;
+  clearSession: () => void;
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -71,18 +72,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // Limpiar storage primero (sin tocar el state aún)
+    // 1. Limpiar storage
     try { await SecureStore.deleteItemAsync("token"); } catch {}
     try { await SecureStore.deleteItemAsync("user");  } catch {}
-    // Limpiar state después de un tick para no desmontar antes de navegar
-    setTimeout(() => {
-      setToken(null);
-      setUser(null);
-    }, 200);
+    // 2. NO limpiar state aquí — el componente que llama logout
+    //    debe navegar primero y dejar que el router maneje el redirect
+    //    El state se limpia solo cuando el init() corre en el próximo mount
+  };
+
+  // Limpiar state solo cuando explícitamente se llama desde fuera
+  const clearSession = () => {
+    setToken(null);
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, clearSession }}>
       {children}
     </AuthContext.Provider>
   );

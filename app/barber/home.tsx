@@ -38,7 +38,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function BarberHome() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, clearSession } = useAuth();
   const palette = getPalette(user?.gender);
 
   const [myBids,         setMyBids]         = useState<MyBid[]>([]);
@@ -148,15 +148,15 @@ export default function BarberHome() {
     });
   };
 
-  // ── FIX: logout con try/catch y setTimeout ────────────────────────────
-  const handleLogout = async () => {
+  const handleLogout = () => {
     Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Salir", style: "destructive",
         onPress: async () => {
-          try { await logout(); } catch {}
-          setTimeout(() => router.replace("/login"), 100);
+          await logout();           // limpia storage
+          router.replace("/login"); // navega ANTES de limpiar state
+          setTimeout(() => clearSession(), 500); // limpia state después
         },
       },
     ]);

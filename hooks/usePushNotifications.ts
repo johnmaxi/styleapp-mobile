@@ -149,7 +149,11 @@ export function usePushNotifications(userId?: number, role?: string) {
                 {
                   text: "✅ Ver solicitudes",
                   onPress: () => {
-                    setTimeout(() => { try { router.replace("/barber/jobs"); } catch {} }, 200);
+                    setTimeout(() => {
+                      try { router.push("/barber/jobs" as any); } catch (e) {
+                        try { router.replace("/barber/jobs" as any); } catch {}
+                      }
+                    }, 300);
                   },
                 },
                 { text: "Omitir", style: "cancel" },
@@ -171,12 +175,15 @@ export function usePushNotifications(userId?: number, role?: string) {
           setTimeout(() => {
             try {
               if (data.type === "new_service") {
-                router.replace("/barber/jobs");
+                // push en vez de replace — no crashea si no hay stack previo
+                router.push("/barber/jobs" as any);
               } else if (data.type === "service_warning" || data.type === "service_expired") {
-                router.replace("/client/home" as any);
+                router.push("/client/home" as any);
               }
-            } catch {}
-          }, 300);
+            } catch (navErr) {
+              console.warn("Navigation error from notification:", navErr);
+            }
+          }, 500);
         } catch {}
       }
     );
