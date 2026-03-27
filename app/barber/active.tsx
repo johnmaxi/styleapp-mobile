@@ -53,7 +53,7 @@ export default function BarberActive() {
   const palette  = getPalette(user?.gender);
   const params   = useLocalSearchParams<{
     id: string; service_type?: string; address?: string;
-    price?: string; status?: string;
+    price?: string; status?: string; client_id?: string;
   }>();
 
   const [request,        setRequest]        = useState<ServiceRequest | null>(null);
@@ -140,6 +140,7 @@ export default function BarberActive() {
         address:      params.address,
         price:        params.price ? Number(params.price) : undefined,
         status:       params.status || "accepted",
+        client_id:    params.client_id ? Number(params.client_id) : undefined,
       };
       setRequest(initial);
       requestRef.current = initial;
@@ -233,11 +234,15 @@ export default function BarberActive() {
     const current = requestRef.current;
     const cInfo   = clientInfoRef.current;
     const reqId   = current?.id || Number(params.id);
-    const cId     = current?.client_id;
+    const cId     = current?.client_id || (params.client_id ? Number(params.client_id) : null);
 
     if (!cId) {
-      // Si no tenemos client_id aún, ir directo al inicio
-      router.replace("/barber/home");
+      // Sin client_id: mostrar Alert con opciones
+      Alert.alert(
+        "✅ Servicio completado",
+        "El servicio fue finalizado exitosamente.",
+        [{ text: "Ir al inicio", onPress: () => setTimeout(() => router.replace("/barber/home"), 200) }]
+      );
       return;
     }
 

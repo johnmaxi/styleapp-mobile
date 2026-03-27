@@ -27,6 +27,7 @@ type ActiveService = {
   price?: number;
   status?: string;
   payment_method?: string;
+  client_id?: number;
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -40,10 +41,10 @@ export default function BarberHome() {
   const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
 
-  const [myBids,        setMyBids]        = useState<MyBid[]>([]);
-  const [activeService, setActiveService] = useState<ActiveService | null>(null);
-  const [loading,       setLoading]       = useState(true);
-  const [isActive,      setIsActive]      = useState(true);
+  const [myBids,         setMyBids]         = useState<MyBid[]>([]);
+  const [activeService,  setActiveService]  = useState<ActiveService | null>(null);
+  const [loading,        setLoading]        = useState(true);
+  const [isActive,       setIsActive]       = useState(true);
   const [togglingActive, setTogglingActive] = useState(false);
 
   const prevOpenCountRef = useRef<number>(-1);
@@ -52,7 +53,6 @@ export default function BarberHome() {
   const displayName = user?.name?.split(" ")[0] || "Profesional";
   const roleLabel   = ROLE_LABELS[user?.role || ""] || "Profesional";
 
-  // ── Registrar push token y actualizar ubicación ───────────────────────
   usePushNotifications(user?.id, user?.role);
 
   const loadData = useCallback(async () => {
@@ -148,6 +148,20 @@ export default function BarberHome() {
     });
   };
 
+  // ── FIX: logout con try/catch y setTimeout ────────────────────────────
+  const handleLogout = async () => {
+    Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Salir", style: "destructive",
+        onPress: async () => {
+          try { await logout(); } catch {}
+          setTimeout(() => router.replace("/login"), 100);
+        },
+      },
+    ]);
+  };
+
   if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
@@ -167,59 +181,42 @@ export default function BarberHome() {
       </Text>
       <Text style={{ color: "#888", marginBottom: 4 }}>Rol: {roleLabel}</Text>
 
-      {/* ── TOGGLE ACTIVO / INACTIVO ── */}
+      {/* Toggle activo */}
       <View style={{
         backgroundColor: isActive ? "#0a2a0a" : "#1a1a1a",
         borderRadius: 14, borderWidth: 2,
         borderColor: isActive ? "#4caf50" : "#555",
-        padding: 16,
-        flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+        padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between",
       }}>
         <View style={{ flex: 1, gap: 4 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{
-              width: 10, height: 10, borderRadius: 5,
-              backgroundColor: isActive ? "#4caf50" : "#555",
-            }} />
-            <Text style={{
-              color: isActive ? "#4caf50" : "#888",
-              fontWeight: "900", fontSize: 16,
-            }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5,
+              backgroundColor: isActive ? "#4caf50" : "#555" }} />
+            <Text style={{ color: isActive ? "#4caf50" : "#888", fontWeight: "900", fontSize: 16 }}>
               {isActive ? "Activo" : "Inactivo"}
             </Text>
           </View>
           <Text style={{ color: "#888", fontSize: 12 }}>
-            {isActive
-              ? "Recibes solicitudes y puedes ofertar"
-              : "No recibes solicitudes nuevas"}
+            {isActive ? "Recibes solicitudes y puedes ofertar" : "No recibes solicitudes nuevas"}
           </Text>
         </View>
         <Switch
-          value={isActive}
-          onValueChange={handleToggleActive}
-          disabled={togglingActive}
+          value={isActive} onValueChange={handleToggleActive} disabled={togglingActive}
           trackColor={{ false: "#333", true: "#1a4d1a" }}
-          thumbColor={isActive ? "#4caf50" : "#666"}
-          ios_backgroundColor="#333"
+          thumbColor={isActive ? "#4caf50" : "#666"} ios_backgroundColor="#333"
         />
       </View>
 
-      {/* ── SERVICIO ACTIVO ── */}
+      {/* Servicio activo */}
       {activeService && (
-        <TouchableOpacity
-          onPress={goToActiveService}
-          style={{
-            backgroundColor: "#0a1a2a",
-            padding: 16, borderRadius: 12, borderWidth: 2,
-            borderColor: activeService.status === "on_route" ? "#2196F3"
-                       : activeService.status === "arrived"  ? "#9C27B0"
-                       : "#0A7E07",
-          }}
-        >
+        <TouchableOpacity onPress={goToActiveService} style={{
+          backgroundColor: "#0a1a2a", padding: 16, borderRadius: 12, borderWidth: 2,
+          borderColor: activeService.status === "on_route" ? "#2196F3"
+                     : activeService.status === "arrived"  ? "#9C27B0" : "#0A7E07",
+        }}>
           <Text style={{
             color: activeService.status === "on_route" ? "#2196F3"
-                 : activeService.status === "arrived"  ? "#9C27B0"
-                 : "#4caf50",
+                 : activeService.status === "arrived"  ? "#9C27B0" : "#4caf50",
             fontWeight: "900", fontSize: 16,
           }}>
             {activeService.status === "on_route" ? "🚗 En camino al cliente"
@@ -243,26 +240,20 @@ export default function BarberHome() {
         </TouchableOpacity>
       )}
 
-      {/* ── OFERTAS PENDIENTES ── */}
+      {/* Ofertas pendientes */}
       {myBids.length > 0 && (
-        <View style={{
-          backgroundColor: "#1a1a0a", padding: 14, borderRadius: 12,
-          borderWidth: 1, borderColor: palette.primary,
-        }}>
+        <View style={{ backgroundColor: "#1a1a0a", padding: 14, borderRadius: 12,
+          borderWidth: 1, borderColor: palette.primary }}>
           <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 8 }}>
             Ofertas enviadas ({myBids.length})
           </Text>
           {myBids.map((bid) => (
-            <View key={bid.id} style={{
-              borderBottomWidth: 1, borderBottomColor: "#333",
-              paddingBottom: 6, marginBottom: 6,
-            }}>
+            <View key={bid.id} style={{ borderBottomWidth: 1, borderBottomColor: "#333",
+              paddingBottom: 6, marginBottom: 6 }}>
               <Text style={{ color: "#ccc" }}>
                 {bid.service_type || "Servicio"} — ${bid.amount.toLocaleString("es-CO")} COP
               </Text>
-              <Text style={{ color: "#888", fontSize: 11 }}>
-                Esperando respuesta del cliente...
-              </Text>
+              <Text style={{ color: "#888", fontSize: 11 }}>Esperando respuesta del cliente...</Text>
             </View>
           ))}
         </View>
@@ -279,44 +270,29 @@ export default function BarberHome() {
       )}
 
       {isActive && (
-        <TouchableOpacity
-          onPress={() => router.push("/barber/jobs")}
-          style={{
-            backgroundColor: palette.card, padding: 16, borderRadius: 10,
-            borderWidth: 1, borderColor: palette.primary, alignItems: "center",
-          }}
-        >
+        <TouchableOpacity onPress={() => router.push("/barber/jobs")}
+          style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10,
+            borderWidth: 1, borderColor: palette.primary, alignItems: "center" }}>
           <Text style={{ color: palette.text, fontWeight: "700" }}>Ver solicitudes disponibles</Text>
         </TouchableOpacity>
       )}
 
-      <TouchableOpacity
-        onPress={() => router.push("/barber/history")}
-        style={{
-          backgroundColor: palette.card, padding: 16, borderRadius: 10,
-          borderWidth: 1, borderColor: palette.primary, alignItems: "center",
-        }}
-      >
+      <TouchableOpacity onPress={() => router.push("/barber/history")}
+        style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10,
+          borderWidth: 1, borderColor: palette.primary, alignItems: "center" }}>
         <Text style={{ color: palette.text, fontWeight: "700" }}>Historial de Solicitudes</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        onPress={() => router.push("/profile")}
-        style={{
-          backgroundColor: palette.card, padding: 16, borderRadius: 10,
-          borderWidth: 1, borderColor: palette.primary, alignItems: "center",
-        }}
-      >
+      <TouchableOpacity onPress={() => router.push("/profile")}
+        style={{ backgroundColor: palette.card, padding: 16, borderRadius: 10,
+          borderWidth: 1, borderColor: palette.primary, alignItems: "center" }}>
         <Text style={{ color: palette.text, fontWeight: "700" }}>Mi perfil</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        onPress={async () => { await logout(); router.replace("/login"); }}
-        style={{
-          borderWidth: 1, borderColor: "#dd0000",
-          padding: 14, borderRadius: 10, alignItems: "center", marginTop: 8,
-        }}
-      >
+      {/* ── FIX: logout con confirmación y setTimeout ── */}
+      <TouchableOpacity onPress={handleLogout}
+        style={{ borderWidth: 1, borderColor: "#dd0000",
+          padding: 14, borderRadius: 10, alignItems: "center", marginTop: 8 }}>
         <Text style={{ color: "#dd0000", fontWeight: "700" }}>Cerrar sesion</Text>
       </TouchableOpacity>
     </ScrollView>
