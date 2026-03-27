@@ -23,6 +23,7 @@ type RequestItem = {
   longitude?:         number;
   payment_method?:    string;
   expires_at?:        string;
+  client_id?:         number;
 };
 
 type BidStatus = "none" | "pending" | "accepted" | "rejected";
@@ -221,10 +222,11 @@ export default function Jobs() {
           pathname: "/barber/active",
           params: {
             id:           String(item.id),
-            service_type: item.service_type || "",
-            address:      item.address      || "",
-            price:        String(item.price || 0),
+            service_type: item.service_type  || "",
+            address:      item.address       || "",
+            price:        String(item.price  || 0),
             status:       "accepted",
+            client_id:    String(res.data?.client_id || item.client_id || ""),
           },
         });
       }

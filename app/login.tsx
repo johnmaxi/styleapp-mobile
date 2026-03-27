@@ -16,9 +16,9 @@ import {
 export default function Login() {
   const router = useRouter();
   const { login } = useAuth();
-  const [email, setEmail]       = useState("");
+  const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading]   = useState(false);
+  const [loading,  setLoading]  = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -27,10 +27,44 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      await login(email.trim(), password.trim());
+      const result = await login(email.trim(), password.trim());
+
+      // Mostrar mensaje de aprobación si el profesional acaba de ser aprobado
+      if (result?.approval_message) {
+        setTimeout(() => {
+          Alert.alert(
+            "🎉 ¡Cuenta aprobada!",
+            result.approval_message!,
+            [{ text: "¡Empecemos!", style: "default" }]
+          );
+        }, 800);
+      }
+
     } catch (err: any) {
-      const msg = err?.response?.data?.error || err?.message || "Error al iniciar sesion";
-      Alert.alert("Error", msg);
+      const status = err?.response?.status;
+      const msg    = err?.response?.data?.error || err?.message || "Error al iniciar sesion";
+
+      // Mensajes específicos para profesionales bloqueados
+      if (status === 403) {
+        const regStatus = err?.response?.data?.registration_status;
+        if (regStatus === "pending") {
+          Alert.alert(
+            "⏳ Cuenta en revisión",
+            "Tu registro está siendo revisado por nuestro equipo.\n\nRecibirás un email cuando tu cuenta sea aprobada (máx. 24 horas).",
+            [{ text: "Entendido" }]
+          );
+        } else if (regStatus === "rejected") {
+          Alert.alert(
+            "❌ Registro rechazado",
+            msg,
+            [{ text: "Entendido" }]
+          );
+        } else {
+          Alert.alert("Error", msg);
+        }
+      } else {
+        Alert.alert("Error", msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -41,10 +75,8 @@ export default function Login() {
       style={{ flex: 1, backgroundColor: "#0d0d0d" }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {/* CONTENIDO PRINCIPAL */}
       <View style={{ flex: 1, justifyContent: "center", padding: 28 }}>
 
-        {/* LOGO STYLE */}
         <Text style={{
           fontSize: 42, fontWeight: "900", color: "#D4AF37",
           textAlign: "center", marginBottom: 6, letterSpacing: 2,
@@ -55,7 +87,6 @@ export default function Login() {
           Servicios de belleza a domicilio
         </Text>
 
-        {/* INPUTS */}
         <TextInput
           placeholder="Email"
           placeholderTextColor="#444"
@@ -74,7 +105,6 @@ export default function Login() {
           style={inputStyle}
         />
 
-        {/* BOTON LOGIN */}
         <TouchableOpacity
           onPress={handleLogin}
           disabled={loading}
@@ -89,7 +119,6 @@ export default function Login() {
           </Text>
         </TouchableOpacity>
 
-        {/* REGISTRO */}
         <TouchableOpacity
           onPress={() => router.push("/(auth)/register")}
           style={{ marginTop: 20 }}
@@ -100,7 +129,6 @@ export default function Login() {
         </TouchableOpacity>
       </View>
 
-      {/* BY ARELOTECH — parte inferior igual que Nequi */}
       <View style={{
         paddingBottom: Platform.OS === "ios" ? 36 : 24,
         alignItems: "center",
