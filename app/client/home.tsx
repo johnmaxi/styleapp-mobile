@@ -1,7 +1,6 @@
 // app/client/home.tsx
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
-import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { getPalette } from "@/utils/palette";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
@@ -18,23 +17,18 @@ const STATUS_LABEL: Record<string, string> = {
   accepted: "Profesional asignado",
   on_route: "Profesional en camino",
   arrived: "Profesional llegó",
-  expired: "⏰ Sin profesionales — toca para republicar",
 };
 
 export default function ClientHome() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
-
   const [activeRequest, setActiveRequest] = useState<ActiveRequest | null>(
     null,
   );
   const [checking, setChecking] = useState(true);
 
   const displayName = user?.name?.split(" ")[0] || "Cliente";
-
-  // ── Recibir notificaciones push (advertencia + expiración) ────────────
-  usePushNotifications(user?.id, user?.role);
 
   useFocusEffect(
     useCallback(() => {
@@ -51,7 +45,6 @@ export default function ClientHome() {
               const rows: ActiveRequest[] = Array.isArray(res.data)
                 ? res.data
                 : res.data?.data || [];
-              // Incluir expired para mostrar opción de republicar
               const active = rows.find(
                 (r) => r.status !== "completed" && r.status !== "cancelled",
               );
@@ -83,10 +76,8 @@ export default function ClientHome() {
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {}
-    setTimeout(() => router.replace("/login"), 100);
+    await logout();
+    router.replace("/login");
   };
 
   if (checking) {
@@ -103,8 +94,6 @@ export default function ClientHome() {
       </View>
     );
   }
-
-  const isExpired = activeRequest?.status === "expired";
 
   return (
     <View
@@ -129,8 +118,8 @@ export default function ClientHome() {
         Bienvenido, {displayName}
       </Text>
 
-      {/* ── Banner servicio activo ── */}
-      {activeRequest && !isExpired && (
+      {/* Banner servicio activo */}
+      {activeRequest && (
         <TouchableOpacity
           onPress={goToStatus}
           style={{
@@ -162,43 +151,11 @@ export default function ClientHome() {
         </TouchableOpacity>
       )}
 
-      {/* ── Banner servicio expirado ── */}
-      {isExpired && (
-        <TouchableOpacity
-          onPress={goToStatus}
-          style={{
-            backgroundColor: "#1a0d00",
-            padding: 14,
-            borderRadius: 12,
-            borderWidth: 2,
-            borderColor: "#FF6B35",
-            marginBottom: 4,
-          }}
-        >
-          <Text style={{ color: "#FF6B35", fontWeight: "900", fontSize: 15 }}>
-            ⏰ Servicio sin profesionales
-          </Text>
-          <Text style={{ color: "#aaa", marginTop: 4, fontSize: 13 }}>
-            {activeRequest?.service_type} — Nadie aceptó la solicitud
-          </Text>
-          <Text
-            style={{
-              color: "#FF6B35",
-              marginTop: 6,
-              fontWeight: "700",
-              fontSize: 13,
-            }}
-          >
-            Toca para volver a publicarlo →
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {/* ── Solicitar / continuar ── */}
+      {/* Solicitar / continuar */}
       <TouchableOpacity
         onPress={() => {
           if (activeRequest) goToStatus();
-          else router.push("/client/select-professional-type" as any);
+          else router.push("/client/create-service");
         }}
         style={{
           backgroundColor: palette.card,
@@ -210,15 +167,13 @@ export default function ClientHome() {
         }}
       >
         <Text style={{ color: palette.text, fontWeight: "700" }}>
-          {activeRequest && !isExpired
+          {activeRequest
             ? "Continuar solicitud activa"
-            : isExpired
-              ? "🔄 Republicar servicio"
-              : "✂️ Solicitar servicio"}
+            : "✂️ Solicitar servicio"}
         </Text>
       </TouchableOpacity>
 
-      {activeRequest && !isExpired && (
+      {activeRequest && (
         <TouchableOpacity
           onPress={goToStatus}
           style={{
@@ -236,7 +191,7 @@ export default function ClientHome() {
         </TouchableOpacity>
       )}
 
-      {/* ── IA para cortes de cabello ── */}
+      {/* ── NUEVO: IA para cortes de cabello ── */}
       <TouchableOpacity
         onPress={() => router.push("/client/haircut-ai" as any)}
         style={{
