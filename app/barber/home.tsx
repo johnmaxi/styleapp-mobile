@@ -38,7 +38,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function BarberHome() {
   const router = useRouter();
-  const { user, logout, clearSession } = useAuth();
+  const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
 
   const [myBids,         setMyBids]         = useState<MyBid[]>([]);
@@ -153,14 +153,9 @@ export default function BarberHome() {
       { text: "Cancelar", style: "cancel" },
       {
         text: "Salir", style: "destructive",
-        onPress: () => {
-          // 1. Navegar primero — antes de tocar cualquier state
+        onPress: async () => {
+          await logout();
           router.replace("/login");
-          // 2. Limpiar storage y state después de navegar
-          setTimeout(async () => {
-            await logout();
-            clearSession();
-          }, 300);
         },
       },
     ]);

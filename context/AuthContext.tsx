@@ -30,12 +30,11 @@ type LoginResult = {
 };
 
 type AuthContextType = {
-  user:         User | null;
-  token:        string | null;
-  loading:      boolean;
-  login:        (email: string, password: string) => Promise<LoginResult>;
-  logout:       () => Promise<void>;
-  clearSession: () => void;
+  user:    User | null;
+  token:   string | null;
+  loading: boolean;
+  login:   (email: string, password: string) => Promise<LoginResult>;
+  logout:  () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -45,11 +44,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token,   setToken]   = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ── Restaurar sesión al iniciar la app ───────────────────────────────
   useEffect(() => {
     const init = async () => {
       try {
-        await SecureStore.deleteItemAsync("token");
-        await SecureStore.deleteItemAsync("user");
+        const savedToken = await SecureStore.getItemAsync("token");
+        const savedUser  = await SecureStore.getItemAsync("user");
+        if (savedToken && savedUser) {
+          setToken(savedToken);
+          setUser(JSON.parse(savedUser));
+        }
       } catch {}
       setLoading(false);
     };
@@ -72,22 +76,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // 1. Limpiar storage
+    // Limpiar storage
     try { await SecureStore.deleteItemAsync("token"); } catch {}
     try { await SecureStore.deleteItemAsync("user");  } catch {}
-    // 2. NO limpiar state aquí — el componente que llama logout
-    //    debe navegar primero y dejar que el router maneje el redirect
-    //    El state se limpia solo cuando el init() corre en el próximo mount
-  };
-
-  // Limpiar state solo cuando explícitamente se llama desde fuera
-  const clearSession = () => {
+    // Limpiar state
     setToken(null);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, clearSession }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
