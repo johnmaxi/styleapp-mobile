@@ -148,15 +148,14 @@ export default function BarberHome() {
     });
   };
 
-  // ── FIX: logout con try/catch y setTimeout ────────────────────────────
-  const handleLogout = async () => {
+  const handleLogout = () => {
     Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Salir", style: "destructive",
         onPress: async () => {
-          try { await logout(); } catch {}
-          setTimeout(() => router.replace("/login"), 100);
+          await logout();
+          router.replace("/login");
         },
       },
     ]);
