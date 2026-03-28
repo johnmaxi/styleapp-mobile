@@ -246,25 +246,21 @@ export default function BarberActive() {
       return;
     }
 
-    try {
-      setTimeout(() => {
-        try {
-          router.replace({
-            pathname: "/rating" as any,
-            params: {
-              service_request_id: String(reqId),
-              rated_id:           String(cId),
-              rated_name:         cInfo?.name || "el cliente",
-              redirect:           "/barber/home",
-            },
-          });
-        } catch {
-          router.replace("/barber/home");
-        }
-      }, 400);
-    } catch {
-      router.replace("/barber/home");
-    }
+    setTimeout(() => {
+      try {
+        router.push({
+          pathname: "/rating" as any,
+          params: {
+            service_request_id: String(reqId),
+            rated_id:           String(cId),
+            rated_name:         cInfo?.name || "el cliente",
+            redirect:           "/barber/home",
+          },
+        });
+      } catch {
+        try { router.replace("/barber/home"); } catch {}
+      }
+    }, 500);
   };
 
   const handleFinalize = async (paymentConfirmed: boolean) => {
@@ -299,7 +295,7 @@ export default function BarberActive() {
                 }
                 setTimeout(() => {
                   try {
-                    router.replace({
+                    router.push({
                       pathname: "/rating" as any,
                       params: {
                         service_request_id: String(finalServiceId),
@@ -309,9 +305,9 @@ export default function BarberActive() {
                       },
                     });
                   } catch {
-                    router.replace("/barber/home");
+                    try { router.replace("/barber/home"); } catch {}
                   }
-                }, 400);
+                }, 500);
               },
             },
             {
