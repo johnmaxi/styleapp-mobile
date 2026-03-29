@@ -96,7 +96,7 @@ export default function ClientHome() {
         style: "destructive",
         onPress: async () => {
           await logout();
-          router.replace("/login");
+          // No llamar router.replace - el _layout.tsx redirige automáticamente
         },
       },
     ]);
