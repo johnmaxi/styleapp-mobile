@@ -76,12 +76,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // Limpiar storage
+    // 1. Limpiar storage inmediatamente
     try { await SecureStore.deleteItemAsync("token"); } catch {}
     try { await SecureStore.deleteItemAsync("user");  } catch {}
-    // Limpiar state
-    setToken(null);
-    setUser(null);
+    // 2. Limpiar state con delay para que router.replace navegue primero
+    setTimeout(() => {
+      setToken(null);
+      setUser(null);
+    }, 300);
   };
 
   return (
