@@ -11,17 +11,17 @@ export type UserRole =
   | "admin";
 
 export type User = {
-  id:                  number;
-  email:               string;
-  role:                UserRole;
-  gender?:             "male" | "female";
-  name?:               string;
-  profile_photo?:      string;
-  rating?:             number;
-  phone?:              string;
-  address?:            string;
-  city?:               string;
-  neighborhood?:       string;
+  id: number;
+  email: string;
+  role: UserRole;
+  gender?: "male" | "female";
+  name?: string;
+  profile_photo?: string;
+  rating?: number;
+  phone?: string;
+  address?: string;
+  city?: string;
+  neighborhood?: string;
   registration_status?: string;
 };
 
@@ -30,18 +30,18 @@ type LoginResult = {
 };
 
 type AuthContextType = {
-  user:    User | null;
-  token:   string | null;
+  user: User | null;
+  token: string | null;
   loading: boolean;
-  login:   (email: string, password: string) => Promise<LoginResult>;
-  logout:  () => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user,    setUser]    = useState<User | null>(null);
-  const [token,   setToken]   = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // ── Restaurar sesión al iniciar la app ───────────────────────────────
@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const init = async () => {
       try {
         const savedToken = await SecureStore.getItemAsync("token");
-        const savedUser  = await SecureStore.getItemAsync("user");
+        const savedUser = await SecureStore.getItemAsync("user");
         if (savedToken && savedUser) {
           setToken(savedToken);
           setUser(JSON.parse(savedUser));
@@ -60,7 +60,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
-  const login = async (email: string, password: string): Promise<LoginResult> => {
+  const login = async (
+    email: string,
+    password: string,
+  ): Promise<LoginResult> => {
     const res = await api.post("/auth/login", { email, password });
     const { token: newToken, user: newUser, approval_message } = res.data;
 
@@ -76,14 +79,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // 1. Limpiar storage inmediatamente
-    try { await SecureStore.deleteItemAsync("token"); } catch {}
-    try { await SecureStore.deleteItemAsync("user");  } catch {}
-    // 2. Limpiar state con delay para que router.replace navegue primero
-    setTimeout(() => {
-      setToken(null);
-      setUser(null);
-    }, 300);
+    // Limpiar storage
+    try {
+      await SecureStore.deleteItemAsync("token");
+    } catch {}
+    try {
+      await SecureStore.deleteItemAsync("user");
+    } catch {}
+    // Limpiar state
+    setToken(null);
+    setUser(null);
   };
 
   return (
