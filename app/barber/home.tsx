@@ -123,12 +123,19 @@ export default function BarberHome() {
     }
   }, []);
 
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
       loadData();
-      const timer = setInterval(loadData, 8000);
-      return () => clearInterval(timer);
+      timerRef.current = setInterval(loadData, 8000);
+      return () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      };
     }, [loadData]),
   );
 
@@ -168,14 +175,14 @@ export default function BarberHome() {
     });
   };
 
-  // ── FIX: logout con try/catch y setTimeout ────────────────────────────
-  const handleLogout = async () => {
+  const handleLogout = () => {
     Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Salir",
         style: "destructive",
         onPress: async () => {
+          // Limpiar sesión y navegar — el RedirectGuard maneja el redirect
           try {
             await logout();
           } catch {}
