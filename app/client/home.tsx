@@ -4,7 +4,13 @@ import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 type ActiveRequest = {
   id: number;
@@ -75,9 +81,20 @@ export default function ClientHome() {
     });
   };
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/login");
+  const handleLogout = () => {
+    Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Salir",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await logout();
+          } catch {}
+          router.replace("/login");
+        },
+      },
+    ]);
   };
 
   if (checking) {
