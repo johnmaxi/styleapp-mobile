@@ -7,19 +7,21 @@ import { Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import api from "../api";
 
-// ── FIX: solo campos válidos en SDK 52/54 ─────────────────────────────────
+// SDK 55 requiere shouldShowBanner y shouldShowList
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge:  false,
+    shouldShowAlert:  true,
+    shouldPlaySound:  true,
+    shouldSetBadge:   false,
+    shouldShowBanner: true,
+    shouldShowList:   true,
   }),
 });
 
 export function usePushNotifications(userId?: number, role?: string) {
   const router               = useRouter();
-  const notificationListener = useRef<any>(null);
-  const responseListener     = useRef<any>(null);
+  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
+  const responseListener     = useRef<Notifications.EventSubscription | null>(null);
 
   // ── Registrar token push ──────────────────────────────────────────────
   useEffect(() => {
@@ -38,7 +40,6 @@ export function usePushNotifications(userId?: number, role?: string) {
         }
         if (finalStatus !== "granted") return;
 
-        // ── FIX: crear canales sin campos inexistentes ────────────────
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync("styleapp-urgent", {
             name:             "StyleApp Urgente",
@@ -115,7 +116,14 @@ export function usePushNotifications(userId?: number, role?: string) {
               "⚠️ Tu servicio expirará pronto",
               "Tu solicitud lleva 7 minutos sin ser aceptada.\n\nExpirará en 3 minutos.\n\n💡 Considera aumentar el precio.",
               [
-                { text: "Ver solicitud", onPress: () => { setTimeout(() => { try { router.push("/client/home" as any); } catch {} }, 200); } },
+                {
+                  text: "Ver solicitud",
+                  onPress: () => {
+                    setTimeout(() => {
+                      try { router.push("/client/home" as any); } catch {}
+                    }, 200);
+                  },
+                },
                 { text: "OK", style: "cancel" },
               ]
             );
@@ -125,9 +133,16 @@ export function usePushNotifications(userId?: number, role?: string) {
           if (data.type === "service_expired") {
             Alert.alert(
               "⏰ Servicio sin profesionales",
-              `Tu solicitud expiró.\n¿Deseas republicarla?`,
+              "Tu solicitud expiró.\n¿Deseas republicarla?",
               [
-                { text: "Ver opciones", onPress: () => { setTimeout(() => { try { router.push("/client/home" as any); } catch {} }, 200); } },
+                {
+                  text: "Ver opciones",
+                  onPress: () => {
+                    setTimeout(() => {
+                      try { router.push("/client/home" as any); } catch {}
+                    }, 200);
+                  },
+                },
                 { text: "Cerrar", style: "cancel" },
               ]
             );
@@ -150,9 +165,7 @@ export function usePushNotifications(userId?: number, role?: string) {
                   text: "✅ Ver solicitudes",
                   onPress: () => {
                     setTimeout(() => {
-                      try { router.push("/barber/jobs" as any); } catch (e) {
-                        try { router.replace("/barber/jobs" as any); } catch {}
-                      }
+                      try { router.push("/barber/jobs" as any); } catch {}
                     }, 300);
                   },
                 },
@@ -175,26 +188,23 @@ export function usePushNotifications(userId?: number, role?: string) {
           setTimeout(() => {
             try {
               if (data.type === "new_service") {
-                // push en vez de replace — no crashea si no hay stack previo
                 router.push("/barber/jobs" as any);
-              } else if (data.type === "service_warning" || data.type === "service_expired") {
+              } else if (
+                data.type === "service_warning" ||
+                data.type === "service_expired"
+              ) {
                 router.push("/client/home" as any);
               }
-            } catch (navErr) {
-              console.warn("Navigation error from notification:", navErr);
-            }
+            } catch {}
           }, 500);
         } catch {}
       }
     );
 
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      // SDK 55: usar .remove() en la suscripción directamente
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
   }, []);
 }
