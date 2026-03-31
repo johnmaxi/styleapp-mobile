@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const cleanToken = String(newToken).replace(/\s+/g, "").trim();
 
+    // ── FIX: guardar AMBOS token y user en SecureStore ────────────────
     await SecureStore.setItemAsync("token", cleanToken);
     await SecureStore.setItemAsync("user", JSON.stringify(newUser));
 
@@ -79,14 +80,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    // Limpiar storage
     try {
       await SecureStore.deleteItemAsync("token");
     } catch {}
     try {
       await SecureStore.deleteItemAsync("user");
     } catch {}
-    // Limpiar state
     setToken(null);
     setUser(null);
   };
