@@ -182,19 +182,17 @@ export default function BarberHome() {
         text: "Salir",
         style: "destructive",
         onPress: async () => {
-          // 1. Limpiar el intervalo primero
+          // 1. Limpiar intervalo
           if (timerRef.current) {
             clearInterval(timerRef.current);
             timerRef.current = null;
           }
-          // 2. Navegar ANTES de limpiar el state
+          // 2. Limpiar sesión primero
+          try {
+            await logout();
+          } catch {}
+          // 3. Navegar después — user ya es null, RedirectGuard no interfiere
           router.replace("/login");
-          // 3. Limpiar state después de navegar
-          setTimeout(async () => {
-            try {
-              await logout();
-            } catch {}
-          }, 300);
         },
       },
     ]);
