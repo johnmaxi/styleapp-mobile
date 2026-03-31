@@ -179,7 +179,6 @@ export default function BarberHome() {
           try {
             await logout();
           } catch {}
-          router.replace("/login");
         },
       },
     ]);
