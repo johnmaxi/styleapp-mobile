@@ -86,7 +86,6 @@ export default function BarberActive() {
   const requestRef = useRef<ServiceRequest | null>(null);
   const lastRouteCalc = useRef<number>(0);
   const lastRoutePos = useRef<LatLng | null>(null);
-  // FIX: evitar setState en componente desmontado
   const isMounted = useRef<boolean>(true);
 
   const updateRoute = useCallback(async (from: LatLng, to: LatLng) => {
@@ -213,7 +212,6 @@ export default function BarberActive() {
           distanceInterval: 5,
         },
         async (loc) => {
-          // FIX: no actualizar estado si el componente ya fue desmontado
           if (!isMounted.current) return;
           const coords: GPSCoords = {
             latitude: loc.coords.latitude,
@@ -222,7 +220,6 @@ export default function BarberActive() {
             updated_at: Date.now(),
           };
           setMyCoords(coords);
-          // FIX: try/catch para evitar crash en Android al animar el mapa
           try {
             mapRef.current?.animateToRegion(
               { ...coords, latitudeDelta: 0.008, longitudeDelta: 0.008 },
@@ -264,7 +261,6 @@ export default function BarberActive() {
     if (s === "completed" || s === "cancelled") stopTracking();
   }, [request?.status]);
 
-  // FIX: cleanup con isMounted
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -294,59 +290,43 @@ export default function BarberActive() {
     }
   };
 
-  // FIX #2: usar requestRef para client_id actualizado + setTimeout evita conflicto Alert/nav
-  const goToRating = () => {
-    const current = requestRef.current;
-    const cInfo = clientInfoRef.current;
-    const reqId = current?.id || Number(params.id);
-    const cId =
-      current?.client_id ||
-      (params.client_id ? Number(params.client_id) : null);
-
-    if (!cId) {
-      Alert.alert(
-        "✅ Servicio completado",
-        "El servicio fue finalizado exitosamente.",
-        [
-          {
-            text: "Ir al inicio",
-            onPress: () =>
-              setTimeout(() => router.replace("/barber/home"), 200),
-          },
-        ],
-      );
-      return;
-    }
-
+  // ── Navegar a calificar ───────────────────────────────────────────────
+  const goToRating = (
+    clientId: number,
+    serviceId: number,
+    clientName: string,
+  ) => {
     setTimeout(() => {
       try {
-        router.replace({
-          pathname: "/rating" as any,
-          params: {
-            service_request_id: String(reqId),
-            rated_id: String(cId),
-            rated_name: cInfo?.name || "el cliente",
-            redirect: "/barber/home",
-          },
-        });
+        const ratingPath = `/rating?service_request_id=${serviceId}&rated_id=${clientId}&rated_name=${encodeURIComponent(clientName)}&redirect=/barber/home`;
+        router.push(ratingPath as any);
       } catch {
-        router.replace("/barber/home");
+        try {
+          router.replace("/barber/home");
+        } catch {}
       }
-    }, 400);
+    }, 500);
   };
 
   const handleFinalize = async (paymentConfirmed: boolean) => {
     if (!request?.id) return;
+    // Capturar valores ANTES de operaciones async
+    const serviceId = request.id;
     setLoading(true);
     setPaymentModal(false);
     try {
-      const res = await api.post(`/payments/finalize-service/${request.id}`, {
+      const res = await api.post(`/payments/finalize-service/${serviceId}`, {
         payment_confirmed: paymentConfirmed,
       });
       if (res.data.ok) {
         await stopTracking();
         const { total, professional_amt, commission_amt, payment_method } =
           res.data.breakdown;
+        // Obtener client_id del servidor (más confiable) o del ref
+        const finalClientId =
+          res.data.client_id || requestRef.current?.client_id || null;
+        const finalClientName = clientInfoRef.current?.name || "el cliente";
+
         Alert.alert(
           "✅ Servicio finalizado",
           `Pago: ${PAYMENT_LABELS[payment_method] || payment_method}\n` +
@@ -354,7 +334,16 @@ export default function BarberActive() {
             `Tu pago (85%): $${Number(professional_amt).toLocaleString("es-CO")}\n` +
             `Comisión app (15%): $${Number(commission_amt).toLocaleString("es-CO")}`,
           [
-            { text: "Calificar cliente", onPress: goToRating },
+            {
+              text: "Calificar cliente",
+              onPress: () => {
+                if (!finalClientId) {
+                  setTimeout(() => router.replace("/barber/home"), 200);
+                  return;
+                }
+                goToRating(finalClientId, serviceId, finalClientName);
+              },
+            },
             {
               text: "Ir al inicio",
               onPress: () =>
@@ -379,11 +368,11 @@ export default function BarberActive() {
     }
   };
 
-  // FIX #3: Cancelación de servicio por el profesional
   const confirmCancel = () => {
+    const penalty = Math.round((request?.price || 0) * 0.15);
     Alert.alert(
-      "Cancelar servicio",
-      "¿Estás seguro de que deseas cancelar este servicio? El cliente será notificado.",
+      "⚠️ Cancelar servicio",
+      `Al cancelar un servicio aceptado se descontará el 15% ($${penalty.toLocaleString("es-CO")}) de tu saldo.\n\n¿Confirmas la cancelación?`,
       [
         { text: "No, continuar", style: "cancel" },
         {
@@ -392,21 +381,25 @@ export default function BarberActive() {
           onPress: async () => {
             setLoading(true);
             try {
-              await api.patch(`/service-requests/${request?.id}/status`, {
-                status: "cancelled",
-              });
+              await api.post(
+                `/payments/cancel-service-professional/${request?.id}`,
+              );
               await stopTracking();
-              Alert.alert("Servicio cancelado", "El servicio fue cancelado.", [
-                {
-                  text: "OK",
-                  onPress: () =>
-                    setTimeout(() => router.replace("/barber/home"), 200),
-                },
-              ]);
+              Alert.alert(
+                "Servicio cancelado",
+                "El servicio fue cancelado. Se notificó al cliente.",
+                [
+                  {
+                    text: "OK",
+                    onPress: () =>
+                      setTimeout(() => router.replace("/barber/home"), 200),
+                  },
+                ],
+              );
             } catch (err: any) {
               Alert.alert(
                 "Error",
-                err?.response?.data?.error || "No se pudo cancelar el servicio",
+                err?.response?.data?.error || "No se pudo cancelar",
               );
             } finally {
               if (isMounted.current) setLoading(false);
@@ -461,7 +454,7 @@ export default function BarberActive() {
         paddingBottom: 40,
       }}
     >
-      {/* MODAL CONFIRMACIÓN DE PAGO */}
+      {/* ── MODAL PAGO ── */}
       <Modal visible={paymentModal} transparent animationType="slide">
         <View
           style={{
@@ -518,7 +511,6 @@ export default function BarberActive() {
                 comisión.
               </Text>
             </View>
-
             <TouchableOpacity
               onPress={() => handleFinalize(true)}
               disabled={loading}
@@ -534,13 +526,12 @@ export default function BarberActive() {
                 {PAYMENT_LABELS[method] || method}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               onPress={() => {
                 setPaymentModal(false);
                 Alert.alert(
                   "⛔ Servicio bloqueado",
-                  `No puedes finalizar hasta confirmar que recibiste el pago de $${price.toLocaleString("es-CO")} COP.`,
+                  `No puedes finalizar hasta confirmar que recibiste $${price.toLocaleString("es-CO")} COP.`,
                   [{ text: "Entendido" }],
                 );
               }}
@@ -563,7 +554,7 @@ export default function BarberActive() {
         </View>
       </Modal>
 
-      {/* MAPA */}
+      {/* ── MAPA ── */}
       {mapRegion && (
         <View style={{ height: 260, position: "relative" }}>
           <MapView
@@ -580,7 +571,6 @@ export default function BarberActive() {
                 geodesic
               />
             )}
-            {/* FIX: tracksViewChanges=false evita crash en Android con New Architecture */}
             {myCoords && (
               <Marker
                 coordinate={myCoords}
@@ -603,7 +593,6 @@ export default function BarberActive() {
               </Marker>
             )}
           </MapView>
-
           <View
             style={{
               position: "absolute",
@@ -627,7 +616,6 @@ export default function BarberActive() {
               {statusInfo.label}
             </Text>
           </View>
-
           {loadingRoute && (
             <View
               style={{
@@ -648,7 +636,7 @@ export default function BarberActive() {
         </View>
       )}
 
-      {/* DETALLES */}
+      {/* ── DETALLES ── */}
       <View style={{ padding: 20, gap: 12 }}>
         <View
           style={{
@@ -829,7 +817,6 @@ export default function BarberActive() {
           </TouchableOpacity>
         )}
 
-        {/* FIX #3: Cancelar servicio — solo visible mientras el servicio está activo */}
         {["accepted", "on_route", "arrived"].includes(
           request?.status || "",
         ) && (
