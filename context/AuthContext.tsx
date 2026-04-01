@@ -44,7 +44,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // ── Restaurar sesión al iniciar la app ───────────────────────────────
   useEffect(() => {
     const init = async () => {
       try {
@@ -52,13 +51,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const savedUser = await SecureStore.getItemAsync("user");
 
         if (savedToken && savedUser) {
-          // Parsear usuario guardado
           let parsedUser = null;
           try {
             parsedUser = JSON.parse(savedUser);
           } catch {}
 
-          // Validar que tiene datos mínimos requeridos
           const isValid =
             parsedUser &&
             parsedUser.id &&
@@ -73,14 +70,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ].includes(parsedUser.role);
 
           if (!isValid) {
-            // Datos corruptos — limpiar todo
             await SecureStore.deleteItemAsync("token").catch(() => {});
             await SecureStore.deleteItemAsync("user").catch(() => {});
             setLoading(false);
             return;
           }
 
-          // Validar token con el servidor
           try {
             const cleanToken = savedToken.replace(/\s+/g, "").trim();
             const res = await api.get("/auth/me", {
@@ -95,7 +90,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               throw new Error("invalid");
             }
           } catch {
-            // Token expirado o inválido — limpiar
             await SecureStore.deleteItemAsync("token").catch(() => {});
             await SecureStore.deleteItemAsync("user").catch(() => {});
           }
@@ -115,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const cleanToken = String(newToken).replace(/\s+/g, "").trim();
 
-    // ── FIX: guardar AMBOS token y user en SecureStore ────────────────
+    // Guardar AMBOS token y user en SecureStore
     await SecureStore.setItemAsync("token", cleanToken);
     await SecureStore.setItemAsync("user", JSON.stringify(newUser));
 
