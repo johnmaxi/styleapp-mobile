@@ -11,17 +11,17 @@ export type UserRole =
   | "admin";
 
 export type User = {
-  id: number;
-  email: string;
-  role: UserRole;
-  gender?: "male" | "female";
-  name?: string;
-  profile_photo?: string;
-  rating?: number;
-  phone?: string;
-  address?: string;
-  city?: string;
-  neighborhood?: string;
+  id:                   number;
+  email:                string;
+  role:                 UserRole;
+  gender?:              "male" | "female";
+  name?:                string;
+  profile_photo?:       string;
+  rating?:              number;
+  phone?:               string;
+  address?:             string;
+  city?:                string;
+  neighborhood?:        string;
   registration_status?: string;
 };
 
@@ -30,18 +30,18 @@ type LoginResult = {
 };
 
 type AuthContextType = {
-  user: User | null;
-  token: string | null;
+  user:    User | null;
+  token:   string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<LoginResult>;
-  logout: () => Promise<void>;
+  login:   (email: string, password: string) => Promise<LoginResult>;
+  logout:  () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [user,    setUser]    = useState<User | null>(null);
+  const [token,   setToken]   = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // ── Restaurar sesión al iniciar la app ───────────────────────────────
@@ -49,10 +49,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const init = async () => {
       try {
         const savedToken = await SecureStore.getItemAsync("token");
-        const savedUser = await SecureStore.getItemAsync("user");
+        const savedUser  = await SecureStore.getItemAsync("user");
         if (savedToken && savedUser) {
-          setToken(savedToken);
-          setUser(JSON.parse(savedUser));
+          // Validar token con el servidor antes de restaurar sesión
+          try {
+            const res = await api.get("/auth/me", {
+              headers: { Authorization: `Bearer ${savedToken.replace(/\s+/g, "").trim()}` },
+            });
+            if (res.data?.user || res.data?.id) {
+              // Token válido — restaurar sesión con datos frescos del servidor
+              const freshUser = res.data?.user || res.data;
+              await SecureStore.setItemAsync("user", JSON.stringify(freshUser));
+              setToken(savedToken.replace(/\s+/g, "").trim());
+              setUser(freshUser);
+            } else {
+              throw new Error("Invalid response");
+            }
+          } catch {
+            // Token inválido o expirado — limpiar sesión
+            await SecureStore.deleteItemAsync("token").catch(() => {});
+            await SecureStore.deleteItemAsync("user").catch(() => {});
+          }
         }
       } catch {}
       setLoading(false);
@@ -60,10 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
-  const login = async (
-    email: string,
-    password: string,
-  ): Promise<LoginResult> => {
+  const login = async (email: string, password: string): Promise<LoginResult> => {
     const res = await api.post("/auth/login", { email, password });
     const { token: newToken, user: newUser, approval_message } = res.data;
 
@@ -71,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // ── FIX: guardar AMBOS token y user en SecureStore ────────────────
     await SecureStore.setItemAsync("token", cleanToken);
-    await SecureStore.setItemAsync("user", JSON.stringify(newUser));
+    await SecureStore.setItemAsync("user",  JSON.stringify(newUser));
 
     setToken(cleanToken);
     setUser(newUser);
@@ -80,12 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    try {
-      await SecureStore.deleteItemAsync("token");
-    } catch {}
-    try {
-      await SecureStore.deleteItemAsync("user");
-    } catch {}
+    try { await SecureStore.deleteItemAsync("token"); } catch {}
+    try { await SecureStore.deleteItemAsync("user");  } catch {}
     setToken(null);
     setUser(null);
   };
