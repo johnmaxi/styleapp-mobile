@@ -25,7 +25,7 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Interceptor de respuesta: si 401, limpiar sesión
+// Si 401, limpiar sesión
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -34,7 +34,7 @@ api.interceptors.response.use(
       await SecureStore.deleteItemAsync("user").catch(() => {});
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;
