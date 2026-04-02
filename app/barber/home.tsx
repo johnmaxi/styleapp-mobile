@@ -419,6 +419,25 @@ export default function BarberHome() {
       )}
 
       <TouchableOpacity
+        onPress={() => router.push("/barber/schedule" as any)}
+        style={{
+          backgroundColor: "#0d1b2e",
+          padding: 16,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: "#2196F3",
+          alignItems: "center",
+          flexDirection: "row",
+          justifyContent: "center",
+          gap: 8,
+        }}
+      >
+        <Text style={{ color: "#2196F3", fontWeight: "700" }}>
+          📅 Mi Agenda
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
         onPress={() => router.push("/barber/history")}
         style={{
           backgroundColor: palette.card,
