@@ -172,7 +172,7 @@ export default function ClientHome() {
       <TouchableOpacity
         onPress={() => {
           if (activeRequest) goToStatus();
-          else router.push("/client/create-service");
+          else router.push("/client/select-professional-type" as any);
         }}
         style={{
           backgroundColor: palette.card,
