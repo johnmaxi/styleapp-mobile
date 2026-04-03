@@ -339,7 +339,7 @@ export default function ProfileScreen() {
 
       {user?.role === "client" && (
         <TouchableOpacity
-          onPress={() => router.push("/client/create-service")}
+          onPress={() => router.push("/client/select-professional-type" as any)}
           style={{
             borderWidth: 1,
             borderColor: palette.primary,

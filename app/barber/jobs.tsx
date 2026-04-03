@@ -24,6 +24,7 @@ type RequestItem = {
   payment_method?:    string;
   expires_at?:        string;
   client_id?:         number;
+  scheduled_at?:      string;
 };
 
 type BidStatus = "none" | "pending" | "accepted" | "rejected";
@@ -217,18 +218,33 @@ export default function Jobs() {
       });
       if (res.data?.ok) {
         playSound("service_accepted");
-        Alert.alert("¡Aceptado!", "Servicio asignado. Dirígete al cliente.");
-        router.push({
-          pathname: "/barber/active",
-          params: {
-            id:           String(item.id),
-            service_type: item.service_type  || "",
-            address:      item.address       || "",
-            price:        String(item.price  || 0),
-            status:       "accepted",
-            client_id:    String(res.data?.client_id || item.client_id || ""),
-          },
-        });
+        if (item.scheduled_at) {
+          // Servicio programado — queda en agenda, no va a active todavía
+          const time = new Date(item.scheduled_at).toLocaleString("es-CO", {
+            weekday: "short", day: "numeric", month: "short",
+            hour: "2-digit", minute: "2-digit",
+          });
+          Alert.alert(
+            "✅ Servicio agendado",
+            `El servicio fue agendado para ${time}.
+
+Recibirás una notificación 1 hora antes.`,
+            [{ text: "Ver mi agenda", onPress: () => router.push("/barber/schedule" as any) }]
+          );
+        } else {
+          Alert.alert("¡Aceptado!", "Servicio asignado. Dirígete al cliente.");
+          router.push({
+            pathname: "/barber/active",
+            params: {
+              id:           String(item.id),
+              service_type: item.service_type  || "",
+              address:      item.address       || "",
+              price:        String(item.price  || 0),
+              status:       "accepted",
+              client_id:    String(res.data?.client_id || item.client_id || ""),
+            },
+          });
+        }
       }
     } catch (err: any) {
       Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar el servicio");
@@ -329,10 +345,12 @@ export default function Jobs() {
 
           return (
             <View key={item.id} style={{
-              backgroundColor: palette.card, borderRadius: 12, padding: 16,
-              borderWidth: 1,
+              backgroundColor: item.scheduled_at ? "#0a1520" : palette.card,
+              borderRadius: 12, padding: 16,
+              borderWidth: item.scheduled_at ? 2 : 1,
               borderColor: bidStatus === "accepted" ? "#4caf50"
                          : bidStatus === "pending"  ? "#D4AF37"
+                         : item.scheduled_at        ? "#2196F3"
                          : "#333",
             }}>
               <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 15, marginBottom: 4 }}>
@@ -355,6 +373,22 @@ export default function Jobs() {
                 <Text style={{ color: timeInfo.color, fontSize: 11, marginBottom: 4 }}>
                   {timeInfo.text}
                 </Text>
+              )}
+
+              {/* Badge servicio programado */}
+              {item.scheduled_at && (
+                <View style={{
+                  backgroundColor: "#0d1b2e", paddingVertical: 4, paddingHorizontal: 10,
+                  borderRadius: 6, alignSelf: "flex-start", marginBottom: 6,
+                  borderWidth: 1, borderColor: "#2196F3", flexDirection: "row", gap: 6,
+                }}>
+                  <Text style={{ color: "#2196F3", fontSize: 12, fontWeight: "700" }}>
+                    📅 PROGRAMADO — {new Date(item.scheduled_at).toLocaleString("es-CO", {
+                      weekday: "short", day: "numeric", month: "short",
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                  </Text>
+                </View>
               )}
 
               {item.payment_method && (
