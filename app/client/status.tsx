@@ -2,15 +2,20 @@
 import api from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { getRouteCoords, LatLng } from "@/utils/directions";
-import { getPalette } from "@/utils/palette";
 import { ClipperMarker, DestinationMarker } from "@/utils/mapMarkers";
+import { getPalette } from "@/utils/palette";
 import { playSound } from "@/utils/sounds";
 import database from "@react-native-firebase/database";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Alert, Linking,
-  ScrollView, Text, TouchableOpacity, View,
+  ActivityIndicator,
+  Alert,
+  Linking,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 
@@ -21,9 +26,18 @@ type ServiceRequest = {
   price?: number;
   latitude?: number;
   longitude?: number;
-  status?: "open" | "accepted" | "on_route" | "arrived" | "completed" | "cancelled";
+  status?:
+    | "open"
+    | "scheduled"
+    | "accepted"
+    | "on_route"
+    | "arrived"
+    | "completed"
+    | "cancelled"
+    | "expired";
   assigned_barber_id?: number;
   barber_name?: string;
+  scheduled_at?: string;
   payment_method?: string;
 };
 
@@ -43,58 +57,78 @@ type TrackingData = {
   updated_at?: number;
 };
 
-const STATUS_INFO: Record<string, { text: string; color: string; emoji: string }> = {
-  open:      { text: "Buscando profesional...",  color: "#D4AF37", emoji: "🔍" },
-  accepted:  { text: "Profesional asignado",      color: "#4caf50", emoji: "✅" },
-  on_route:  { text: "Profesional en camino",     color: "#2196F3", emoji: "🚗" },
-  arrived:   { text: "Profesional llegó",         color: "#9C27B0", emoji: "📍" },
-  completed: { text: "Servicio completado",        color: "#4caf50", emoji: "🎉" },
-  cancelled: { text: "Servicio cancelado",         color: "#dd0000", emoji: "❌" },
+const STATUS_INFO: Record<
+  string,
+  { text: string; color: string; emoji: string }
+> = {
+  open: { text: "Buscando profesional...", color: "#D4AF37", emoji: "🔍" },
+  accepted: { text: "Profesional asignado", color: "#4caf50", emoji: "✅" },
+  on_route: { text: "Profesional en camino", color: "#2196F3", emoji: "🚗" },
+  arrived: { text: "Profesional llegó", color: "#9C27B0", emoji: "📍" },
+  completed: { text: "Servicio completado", color: "#4caf50", emoji: "🎉" },
+  cancelled: { text: "Servicio cancelado", color: "#dd0000", emoji: "❌" },
+  expired: {
+    text: "Sin profesionales disponibles",
+    color: "#FF6B35",
+    emoji: "⏰",
+  },
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
-  efectivo: "Efectivo", pse: "PSE", nequi: "Nequi", tarjeta: "Tarjeta",
+  efectivo: "Efectivo",
+  pse: "PSE",
+  nequi: "Nequi",
+  tarjeta: "Tarjeta",
 };
 
 export default function ClientStatus() {
   const router = useRouter();
   const params = useLocalSearchParams<{
-    id?: string; service_type?: string; address?: string;
-    price?: string; latitude?: string; longitude?: string; status?: string;
+    id?: string;
+    service_type?: string;
+    address?: string;
+    price?: string;
+    latitude?: string;
+    longitude?: string;
+    status?: string;
   }>();
   const { user } = useAuth();
-  const palette  = getPalette(user?.gender);
+  const palette = getPalette(user?.gender);
 
-  const [loading, setLoading]         = useState(true);
-  const [request, setRequest]         = useState<ServiceRequest | null>(null);
-  const [bids, setBids]               = useState<Bid[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [request, setRequest] = useState<ServiceRequest | null>(null);
+  const [bids, setBids] = useState<Bid[]>([]);
   const [actingBidId, setActingBidId] = useState<number | null>(null);
-  const [professionalCoords, setProfessionalCoords] = useState<TrackingData | null>(null);
+  const [professionalCoords, setProfessionalCoords] =
+    useState<TrackingData | null>(null);
   const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
   const [loadingRoute, setLoadingRoute] = useState(false);
 
   const completedAlertShown = useRef(false);
-  const arrivedAlertShown   = useRef(false);
-  const prevBidsCount       = useRef(-1);
-  const prevStatus          = useRef<string>("");
+  const arrivedAlertShown = useRef(false);
+  const prevBidsCount = useRef(-1);
+  const prevStatus = useRef<string>("");
   const mapRef = useRef<MapView>(null);
 
   const lastRouteCalc = useRef<number>(0);
-  const lastRoutePos  = useRef<LatLng | null>(null);
+  const lastRoutePos = useRef<LatLng | null>(null);
 
   const updateRoute = useCallback(async (from: LatLng, to: LatLng) => {
-    const now     = Date.now();
+    const now = Date.now();
     const lastPos = lastRoutePos.current;
     let movedEnough = true;
     if (lastPos) {
       const dlat = (from.latitude - lastPos.latitude) * 111000;
-      const dlng = (from.longitude - lastPos.longitude) * 111000 * Math.cos(from.latitude * Math.PI / 180);
+      const dlng =
+        (from.longitude - lastPos.longitude) *
+        111000 *
+        Math.cos((from.latitude * Math.PI) / 180);
       movedEnough = Math.sqrt(dlat * dlat + dlng * dlng) > 50;
     }
-    if (!lastPos || movedEnough || (now - lastRouteCalc.current) > 30000) {
+    if (!lastPos || movedEnough || now - lastRouteCalc.current > 30000) {
       setLoadingRoute(true);
       lastRouteCalc.current = now;
-      lastRoutePos.current  = from;
+      lastRoutePos.current = from;
       try {
         const coords = await getRouteCoords(from, to);
         setRouteCoords(coords);
@@ -112,34 +146,53 @@ export default function ClientStatus() {
       const data = snap.val();
       if (data?.latitude && data?.longitude) {
         setProfessionalCoords(data as TrackingData);
-        mapRef.current?.animateToRegion({
-          latitude: data.latitude, longitude: data.longitude,
-          latitudeDelta: 0.012, longitudeDelta: 0.012,
-        }, 600);
+        mapRef.current?.animateToRegion(
+          {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            latitudeDelta: 0.012,
+            longitudeDelta: 0.012,
+          },
+          600,
+        );
       }
     });
     return () => ref.off("value", onValue);
   }, [params.id]);
 
   useEffect(() => {
-    if (professionalCoords && request?.latitude && request?.longitude && request.status === "on_route") {
+    if (
+      professionalCoords &&
+      request?.latitude &&
+      request?.longitude &&
+      request.status === "on_route"
+    ) {
       updateRoute(
-        { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
-        { latitude: request.latitude, longitude: request.longitude }
+        {
+          latitude: professionalCoords.latitude,
+          longitude: professionalCoords.longitude,
+        },
+        { latitude: request.latitude, longitude: request.longitude },
       );
     }
     if (request?.status === "arrived" || request?.status === "completed") {
       setRouteCoords([]);
     }
-  }, [professionalCoords, request?.latitude, request?.longitude, request?.status]);
+  }, [
+    professionalCoords,
+    request?.latitude,
+    request?.longitude,
+    request?.status,
+  ]);
 
   // ── Carga del servicio ────────────────────────────────────────────────
   const getRequestById = async (id: number): Promise<ServiceRequest | null> => {
     for (const path of [`/service-requests/${id}`, `/service-request/${id}`]) {
       try {
-        const res  = await api.get(path);
+        const res = await api.get(path);
         const data = res.data?.data || res.data?.request || res.data;
-        if (data && !Array.isArray(data) && data.id) return data as ServiceRequest;
+        if (data && !Array.isArray(data) && data.id)
+          return data as ServiceRequest;
       } catch (e: any) {
         if (e?.response?.status !== 404) throw e;
       }
@@ -150,9 +203,15 @@ export default function ClientStatus() {
   const getActiveRequest = async (): Promise<ServiceRequest | null> => {
     for (const path of ["/service-requests/mine", "/service-request/mine"]) {
       try {
-        const res  = await api.get(path);
-        const rows: ServiceRequest[] = Array.isArray(res.data) ? res.data : res.data?.data || [];
-        return rows.find((r) => r.status !== "completed" && r.status !== "cancelled") || null;
+        const res = await api.get(path);
+        const rows: ServiceRequest[] = Array.isArray(res.data)
+          ? res.data
+          : res.data?.data || [];
+        return (
+          rows.find(
+            (r) => r.status !== "completed" && r.status !== "cancelled",
+          ) || null
+        );
       } catch {}
     }
     return null;
@@ -162,7 +221,9 @@ export default function ClientStatus() {
     try {
       const res = await api.get(`/bids/request/${requestId}`);
       return Array.isArray(res.data) ? res.data : res.data?.data || [];
-    } catch { return []; }
+    } catch {
+      return [];
+    }
   };
 
   const loadStatus = useCallback(async () => {
@@ -172,12 +233,13 @@ export default function ClientStatus() {
         current = await getRequestById(Number(params.id));
         if (!current) {
           current = {
-            id: Number(params.id), service_type: params.service_type,
+            id: Number(params.id),
+            service_type: params.service_type,
             address: params.address,
-            price:     params.price     ? Number(params.price)     : undefined,
-            latitude:  params.latitude  ? Number(params.latitude)  : undefined,
+            price: params.price ? Number(params.price) : undefined,
+            latitude: params.latitude ? Number(params.latitude) : undefined,
             longitude: params.longitude ? Number(params.longitude) : undefined,
-            status:    (params.status as ServiceRequest["status"]) || "open",
+            status: (params.status as ServiceRequest["status"]) || "open",
           };
         }
       }
@@ -186,7 +248,10 @@ export default function ClientStatus() {
       if (current) {
         const newBids = await getBids(current.id);
         // Sonido al llegar nueva contraoferta
-        if (prevBidsCount.current >= 0 && newBids.length > prevBidsCount.current) {
+        if (
+          prevBidsCount.current >= 0 &&
+          newBids.length > prevBidsCount.current
+        ) {
           playSound("counteroffer");
         }
         prevBidsCount.current = newBids.length;
@@ -194,9 +259,9 @@ export default function ClientStatus() {
 
         // Sonidos al cambiar estado
         if (prevStatus.current && current.status !== prevStatus.current) {
-          if (current.status === "accepted")  playSound("service_accepted");
-          if (current.status === "on_route")  playSound("on_route");
-          if (current.status === "arrived")   playSound("arrived");
+          if (current.status === "accepted") playSound("service_accepted");
+          if (current.status === "on_route") playSound("on_route");
+          if (current.status === "arrived") playSound("arrived");
           if (current.status === "completed") playSound("service_complete");
         }
         prevStatus.current = current.status || "";
@@ -207,7 +272,10 @@ export default function ClientStatus() {
       // Alerta de llegada
       if (current?.status === "arrived" && !arrivedAlertShown.current) {
         arrivedAlertShown.current = true;
-        Alert.alert("📍 El profesional llegó", "Tu profesional llegó a la dirección del servicio.");
+        Alert.alert(
+          "📍 El profesional llegó",
+          "Tu profesional llegó a la dirección del servicio.",
+        );
       }
 
       // Alerta de servicio completado
@@ -218,21 +286,27 @@ export default function ClientStatus() {
             "Servicio completado",
             "¿Confirmas que el servicio fue completado?",
             [
-              { text: "No, hay un problema", style: "destructive",
-                onPress: () => Alert.alert("Reportado", "Contactanos para resolver.") },
-              { text: "Sí, calificar",
-                onPress: () => router.replace({
-                  pathname: "/rating",
-                  params: {
-                    service_request_id: String(current!.id),
-                    rated_id:           String(current!.assigned_barber_id || ""),
-                    rated_name:         current!.barber_name || "el profesional",
-                    redirect:           "/client/home",
-                  },
-                }),
+              {
+                text: "No, hay un problema",
+                style: "destructive",
+                onPress: () =>
+                  Alert.alert("Reportado", "Contactanos para resolver."),
+              },
+              {
+                text: "Sí, calificar",
+                onPress: () =>
+                  router.replace({
+                    pathname: "/rating",
+                    params: {
+                      service_request_id: String(current!.id),
+                      rated_id: String(current!.assigned_barber_id || ""),
+                      rated_name: current!.barber_name || "el profesional",
+                      redirect: "/client/home",
+                    },
+                  }),
               },
             ],
-            { cancelable: false }
+            { cancelable: false },
           );
         }, 500);
       }
@@ -259,7 +333,9 @@ export default function ClientStatus() {
       await loadStatus();
     } catch (err: any) {
       Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar");
-    } finally { setActingBidId(null); }
+    } finally {
+      setActingBidId(null);
+    }
   };
 
   const rejectBid = async (bidId: number) => {
@@ -269,19 +345,42 @@ export default function ClientStatus() {
       await loadStatus();
     } catch (err: any) {
       Alert.alert("Error", err?.response?.data?.error || "No se pudo rechazar");
-    } finally { setActingBidId(null); }
+    } finally {
+      setActingBidId(null);
+    }
+  };
+
+  // ── Republicar servicio expirado ─────────────────────────────────────
+  const republishService = async () => {
+    if (!request?.id) return;
+    try {
+      // Cambiar status de expired a open y renovar expires_at
+      await api.patch(`/service-requests/${request.id}/status`, {
+        status: "open",
+      });
+      Alert.alert(
+        "✅ Servicio republicado",
+        "Tu solicitud vuelve a estar disponible para los profesionales.",
+      );
+      loadStatus();
+    } catch (err: any) {
+      Alert.alert(
+        "Error",
+        err?.response?.data?.error || "No se pudo republicar el servicio",
+      );
+    }
   };
 
   const cancelService = async () => {
     if (!request?.id) return;
 
-    const status         = request.status || "open";
-    const price          = request.price  || 0;
-    const paymentMethod  = request.payment_method || "";
-    const HAS_PENALTY    = ["accepted", "on_route", "arrived"].includes(status);
-    const penalty        = Math.round(price * 0.15);
-    const MP_METHODS     = ["pse", "tarjeta"];
-    const isMPPayment    = MP_METHODS.includes(paymentMethod);
+    const status = request.status || "open";
+    const price = request.price || 0;
+    const paymentMethod = request.payment_method || "";
+    const HAS_PENALTY = ["accepted", "on_route", "arrived"].includes(status);
+    const penalty = Math.round(price * 0.15);
+    const MP_METHODS = ["pse", "tarjeta"];
+    const isMPPayment = MP_METHODS.includes(paymentMethod);
 
     const penaltyMsg = HAS_PENALTY
       ? isMPPayment
@@ -301,47 +400,81 @@ export default function ClientStatus() {
             try {
               if (HAS_PENALTY) {
                 // Usar endpoint de cancelación con penalización
-                const res = await api.post(`/payments/cancel-service/${request.id}`, {});
+                const res = await api.post(
+                  `/payments/cancel-service/${request.id}`,
+                  {},
+                );
                 if (res.data.penalized) {
                   Alert.alert(
                     "Servicio cancelado",
                     `Se descontaron $${penalty.toLocaleString("es-CO")} COP de penalización (15%).`,
-                    [{ text: "OK", onPress: () => router.replace("/client/home") }]
+                    [
+                      {
+                        text: "OK",
+                        onPress: () => router.replace("/client/home"),
+                      },
+                    ],
                   );
                 } else {
                   router.replace("/client/home");
                 }
               } else {
-                await api.patch(`/service-requests/${request.id}/status`, { status: "cancelled" });
+                await api.patch(`/service-requests/${request.id}/status`, {
+                  status: "cancelled",
+                });
                 router.replace("/client/home");
               }
             } catch (err: any) {
-              Alert.alert("Error", err?.response?.data?.error || "No se pudo cancelar");
+              Alert.alert(
+                "Error",
+                err?.response?.data?.error || "No se pudo cancelar",
+              );
             }
           },
         },
-      ]
+      ],
     );
   };
 
-  const acceptedBid  = bids.find((b) => b.status === "accepted");
-  const pendingBids  = bids.filter((b) => b.status === "pending");
-  const statusInfo   = STATUS_INFO[request?.status || "open"] || STATUS_INFO.open;
-  const serviceActive = ["accepted", "on_route", "arrived"].includes(request?.status || "");
+  const acceptedBid = bids.find((b) => b.status === "accepted");
+  const pendingBids = bids.filter((b) => b.status === "pending");
+  const statusInfo = STATUS_INFO[request?.status || "open"] || STATUS_INFO.open;
+  const serviceActive = ["accepted", "on_route", "arrived"].includes(
+    request?.status || "",
+  );
 
   const gpsAge = professionalCoords?.updated_at
     ? Math.round((Date.now() - professionalCoords.updated_at) / 1000)
     : null;
 
   const mapRegion = useMemo(() => {
-    if (professionalCoords) return { latitude: professionalCoords.latitude, longitude: professionalCoords.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 };
-    if (request?.latitude && request?.longitude) return { latitude: request.latitude, longitude: request.longitude, latitudeDelta: 0.015, longitudeDelta: 0.015 };
+    if (professionalCoords)
+      return {
+        latitude: professionalCoords.latitude,
+        longitude: professionalCoords.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      };
+    if (request?.latitude && request?.longitude)
+      return {
+        latitude: request.latitude,
+        longitude: request.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      };
     return null;
   }, [professionalCoords, request?.latitude, request?.longitude]);
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: palette.background,
+        }}
+      >
         <ActivityIndicator size="large" color={palette.primary} />
       </View>
     );
@@ -349,11 +482,29 @@ export default function ClientStatus() {
 
   if (!request) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: palette.background }}>
-        <Text style={{ color: palette.text, marginBottom: 12 }}>No tienes solicitudes activas.</Text>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 24,
+          backgroundColor: palette.background,
+        }}
+      >
+        <Text style={{ color: palette.text, marginBottom: 12 }}>
+          No tienes solicitudes activas.
+        </Text>
         <TouchableOpacity
-          onPress={() => router.replace("/client/create-service")}
-          style={{ backgroundColor: palette.card, padding: 14, borderRadius: 8, borderWidth: 1, borderColor: palette.primary }}
+          onPress={() =>
+            router.replace("/client/select-professional-type" as any)
+          }
+          style={{
+            backgroundColor: palette.card,
+            padding: 14,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: palette.primary,
+          }}
         >
           <Text style={{ color: palette.text }}>Crear solicitud</Text>
         </TouchableOpacity>
@@ -362,17 +513,28 @@ export default function ClientStatus() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ backgroundColor: palette.background, paddingBottom: 36 }}>
-
+    <ScrollView
+      contentContainerStyle={{
+        backgroundColor: palette.background,
+        paddingBottom: 36,
+      }}
+    >
       {/* ── MAPA ── */}
       {mapRegion && (
         <View style={{ height: 300, position: "relative" }}>
           <MapView
-            ref={mapRef} provider={PROVIDER_GOOGLE}
-            style={{ flex: 1 }} initialRegion={mapRegion}
+            ref={mapRef}
+            provider={PROVIDER_GOOGLE}
+            style={{ flex: 1 }}
+            initialRegion={mapRegion}
           >
             {routeCoords.length > 1 && (
-              <Polyline coordinates={routeCoords} strokeColor="#2196F3" strokeWidth={4} geodesic={true} />
+              <Polyline
+                coordinates={routeCoords}
+                strokeColor="#2196F3"
+                strokeWidth={4}
+                geodesic={true}
+              />
             )}
 
             {/* ── Marker profesional — ícono de máquina de cortar ── */}
@@ -381,8 +543,11 @@ export default function ClientStatus() {
                 coordinate={professionalCoords}
                 title={acceptedBid?.name || "Profesional"}
                 description={
-                  request.status === "arrived" ? "Llegó a tu dirección"
-                  : gpsAge !== null ? `Actualizado hace ${gpsAge}s` : "En camino"
+                  request.status === "arrived"
+                    ? "Llegó a tu dirección"
+                    : gpsAge !== null
+                      ? `Actualizado hace ${gpsAge}s`
+                      : "En camino"
                 }
                 anchor={{ x: 0.5, y: 0.5 }}
               >
@@ -393,7 +558,10 @@ export default function ClientStatus() {
             {/* ── Marker destino — pin dorado ── */}
             {request.latitude && request.longitude && (
               <Marker
-                coordinate={{ latitude: request.latitude, longitude: request.longitude }}
+                coordinate={{
+                  latitude: request.latitude,
+                  longitude: request.longitude,
+                }}
                 title="Lugar del servicio"
                 description={request.address}
                 anchor={{ x: 0.5, y: 1.0 }}
@@ -404,37 +572,80 @@ export default function ClientStatus() {
           </MapView>
 
           {/* Badge estado GPS */}
-          <View style={{
-            position: "absolute", top: 10, left: 10,
-            backgroundColor: "#000000bb", borderRadius: 8,
-            paddingHorizontal: 10, paddingVertical: 6,
-            borderWidth: 1,
-            borderColor: request.status === "arrived"  ? "#9C27B0"
-                       : request.status === "on_route" ? "#2196F3" : "#555",
-            flexDirection: "row", alignItems: "center", gap: 6,
-          }}>
-            <View style={{
-              width: 8, height: 8, borderRadius: 4,
-              backgroundColor: professionalCoords
-                ? (request.status === "arrived" ? "#9C27B0" : "#4caf50") : "#555",
-            }} />
-            <Text style={{ color: professionalCoords ? "#fff" : "#888", fontSize: 11 }}>
-              {request.status === "arrived"   ? "📍 Profesional llegó"
-             : request.status === "on_route" && professionalCoords ? `✂ En camino${gpsAge !== null ? ` · ${gpsAge}s` : ""}`
-             : request.status === "accepted"  ? "Esperando que inicie el camino"
-             : "Sin señal GPS"}
+          <View
+            style={{
+              position: "absolute",
+              top: 10,
+              left: 10,
+              backgroundColor: "#000000bb",
+              borderRadius: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderWidth: 1,
+              borderColor:
+                request.status === "arrived"
+                  ? "#9C27B0"
+                  : request.status === "on_route"
+                    ? "#2196F3"
+                    : "#555",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <View
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: professionalCoords
+                  ? request.status === "arrived"
+                    ? "#9C27B0"
+                    : "#4caf50"
+                  : "#555",
+              }}
+            />
+            <Text
+              style={{
+                color: professionalCoords ? "#fff" : "#888",
+                fontSize: 11,
+              }}
+            >
+              {request.status === "arrived"
+                ? "📍 Profesional llegó"
+                : request.status === "on_route" && professionalCoords
+                  ? `✂ En camino${gpsAge !== null ? ` · ${gpsAge}s` : ""}`
+                  : request.status === "accepted"
+                    ? "Esperando que inicie el camino"
+                    : "Sin señal GPS"}
             </Text>
           </View>
 
           {routeCoords.length > 1 && (
-            <View style={{
-              position: "absolute", top: 10, right: 10,
-              backgroundColor: "#000000bb", borderRadius: 8,
-              paddingHorizontal: 10, paddingVertical: 6,
-              borderWidth: 1, borderColor: "#2196F355",
-              flexDirection: "row", alignItems: "center", gap: 6,
-            }}>
-              <View style={{ width: 16, height: 3, backgroundColor: "#2196F3", borderRadius: 2 }} />
+            <View
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                backgroundColor: "#000000bb",
+                borderRadius: 8,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderWidth: 1,
+                borderColor: "#2196F355",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <View
+                style={{
+                  width: 16,
+                  height: 3,
+                  backgroundColor: "#2196F3",
+                  borderRadius: 2,
+                }}
+              />
               <Text style={{ color: "#2196F3", fontSize: 11 }}>
                 {loadingRoute ? "Actualizando..." : "Ruta activa"}
               </Text>
@@ -443,15 +654,40 @@ export default function ClientStatus() {
 
           <TouchableOpacity
             onPress={() => {
-              if (professionalCoords && request.latitude && request.longitude && mapRef.current) {
+              if (
+                professionalCoords &&
+                request.latitude &&
+                request.longitude &&
+                mapRef.current
+              ) {
                 mapRef.current.fitToCoordinates(
-                  [{ latitude: professionalCoords.latitude, longitude: professionalCoords.longitude },
-                   { latitude: request.latitude!, longitude: request.longitude! }],
-                  { edgePadding: { top: 60, right: 40, bottom: 40, left: 40 }, animated: true }
+                  [
+                    {
+                      latitude: professionalCoords.latitude,
+                      longitude: professionalCoords.longitude,
+                    },
+                    {
+                      latitude: request.latitude!,
+                      longitude: request.longitude!,
+                    },
+                  ],
+                  {
+                    edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
+                    animated: true,
+                  },
                 );
               }
             }}
-            style={{ position: "absolute", bottom: 12, right: 12, backgroundColor: "#000000cc", borderRadius: 8, padding: 10, borderWidth: 1, borderColor: "#444" }}
+            style={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              backgroundColor: "#000000cc",
+              borderRadius: 8,
+              padding: 10,
+              borderWidth: 1,
+              borderColor: "#444",
+            }}
           >
             <Text style={{ color: "#fff", fontSize: 18 }}>⊕</Text>
           </TouchableOpacity>
@@ -459,31 +695,91 @@ export default function ClientStatus() {
       )}
 
       <View style={{ padding: 20, gap: 12 }}>
-        <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>Estado de tu solicitud</Text>
+        <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>
+          Estado de tu solicitud
+        </Text>
+
+        {/* Badge servicio programado */}
+        {request?.scheduled_at && (
+          <View
+            style={{
+              backgroundColor: "#0d1b2e",
+              borderRadius: 10,
+              padding: 12,
+              borderWidth: 1,
+              borderColor: "#2196F3",
+            }}
+          >
+            <Text style={{ color: "#2196F3", fontWeight: "700", fontSize: 14 }}>
+              📅 SERVICIO PROGRAMADO
+            </Text>
+            <Text style={{ color: "#4a90e2", fontSize: 13, marginTop: 4 }}>
+              {new Date(request.scheduled_at).toLocaleString("es-CO", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </Text>
+            <Text style={{ color: "#555", fontSize: 11, marginTop: 4 }}>
+              ⏰ Recibirás recordatorio 1 hora antes
+            </Text>
+          </View>
+        )}
 
         {/* STATUS */}
-        <View style={{
-          backgroundColor: palette.card, padding: 16, borderRadius: 12,
-          borderWidth: 1, borderColor: statusInfo.color,
-          flexDirection: "row", alignItems: "center", gap: 10,
-        }}>
+        <View
+          style={{
+            backgroundColor: palette.card,
+            padding: 16,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: statusInfo.color,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
           <Text style={{ fontSize: 24 }}>{statusInfo.emoji}</Text>
           <View>
-            <Text style={{ color: statusInfo.color, fontWeight: "900", fontSize: 16 }}>{statusInfo.text}</Text>
-            <Text style={{ color: "#aaa", fontSize: 12 }}>Solicitud #{request.id}</Text>
+            <Text
+              style={{
+                color: statusInfo.color,
+                fontWeight: "900",
+                fontSize: 16,
+              }}
+            >
+              {statusInfo.text}
+            </Text>
+            <Text style={{ color: "#aaa", fontSize: 12 }}>
+              Solicitud #{request.id}
+            </Text>
           </View>
         </View>
 
         {/* DETALLES */}
-        <View style={{ backgroundColor: palette.card, padding: 14, borderRadius: 10, gap: 4 }}>
-          <Text style={{ color: palette.text }}>Servicio: {request.service_type || "No definido"}</Text>
-          <Text style={{ color: palette.text }}>Dirección: {request.address || "No definida"}</Text>
+        <View
+          style={{
+            backgroundColor: palette.card,
+            padding: 14,
+            borderRadius: 10,
+            gap: 4,
+          }}
+        >
+          <Text style={{ color: palette.text }}>
+            Servicio: {request.service_type || "No definido"}
+          </Text>
+          <Text style={{ color: palette.text }}>
+            Dirección: {request.address || "No definida"}
+          </Text>
           <Text style={{ color: palette.primary, fontWeight: "700" }}>
             Precio: ${(request.price ?? 0).toLocaleString("es-CO")} COP
           </Text>
           {request.payment_method && (
             <Text style={{ color: "#aaa" }}>
-              Pago: {PAYMENT_LABELS[request.payment_method] || request.payment_method}
+              Pago:{" "}
+              {PAYMENT_LABELS[request.payment_method] || request.payment_method}
             </Text>
           )}
         </View>
@@ -491,29 +787,67 @@ export default function ClientStatus() {
         {/* CONTRAOFERTAS */}
         {pendingBids.length > 0 && (
           <>
-            <Text style={{ fontSize: 17, fontWeight: "700", color: palette.text }}>
+            <Text
+              style={{ fontSize: 17, fontWeight: "700", color: palette.text }}
+            >
               Contraofertas ({pendingBids.length})
             </Text>
             {pendingBids.map((bid) => (
-              <View key={bid.id} style={{ borderWidth: 1, borderColor: palette.primary, borderRadius: 10, padding: 14 }}>
-                <Text style={{ color: palette.text }}>Profesional: {bid.name || `#${bid.barber_id}`}</Text>
-                <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 18 }}>
+              <View
+                key={bid.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: palette.primary,
+                  borderRadius: 10,
+                  padding: 14,
+                }}
+              >
+                <Text style={{ color: palette.text }}>
+                  Profesional: {bid.name || `#${bid.barber_id}`}
+                </Text>
+                <Text
+                  style={{
+                    color: palette.primary,
+                    fontWeight: "700",
+                    fontSize: 18,
+                  }}
+                >
                   Oferta: ${bid.amount.toLocaleString("es-CO")}
                 </Text>
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
                   <TouchableOpacity
-                    onPress={() => acceptBid(bid.id)} disabled={actingBidId === bid.id}
-                    style={{ flex: 1, backgroundColor: "#0A7E07", padding: 10, borderRadius: 8 }}
+                    onPress={() => acceptBid(bid.id)}
+                    disabled={actingBidId === bid.id}
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#0A7E07",
+                      padding: 10,
+                      borderRadius: 8,
+                    }}
                   >
-                    <Text style={{ color: "#fff", textAlign: "center", fontWeight: "700" }}>
+                    <Text
+                      style={{
+                        color: "#fff",
+                        textAlign: "center",
+                        fontWeight: "700",
+                      }}
+                    >
                       {actingBidId === bid.id ? "..." : "Aceptar"}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => rejectBid(bid.id)} disabled={actingBidId === bid.id}
-                    style={{ flex: 1, backgroundColor: "#b30000", padding: 10, borderRadius: 8 }}
+                    onPress={() => rejectBid(bid.id)}
+                    disabled={actingBidId === bid.id}
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#b30000",
+                      padding: 10,
+                      borderRadius: 8,
+                    }}
                   >
-                    <Text style={{ color: "#fff", textAlign: "center" }}>Rechazar</Text>
+                    <Text style={{ color: "#fff", textAlign: "center" }}>
+                      Rechazar
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -523,10 +857,26 @@ export default function ClientStatus() {
 
         {/* PROFESIONAL ASIGNADO */}
         {acceptedBid && (
-          <View style={{ backgroundColor: "#0a2a0a", padding: 14, borderRadius: 10, borderWidth: 1, borderColor: "#0A7E07" }}>
-            <Text style={{ color: "#4caf50", fontWeight: "700", marginBottom: 4 }}>Profesional asignado</Text>
-            <Text style={{ color: palette.text }}>{acceptedBid.name || `#${acceptedBid.barber_id}`}</Text>
-            <Text style={{ color: palette.text }}>Valor acordado: ${acceptedBid.amount.toLocaleString("es-CO")} COP</Text>
+          <View
+            style={{
+              backgroundColor: "#0a2a0a",
+              padding: 14,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: "#0A7E07",
+            }}
+          >
+            <Text
+              style={{ color: "#4caf50", fontWeight: "700", marginBottom: 4 }}
+            >
+              Profesional asignado
+            </Text>
+            <Text style={{ color: palette.text }}>
+              {acceptedBid.name || `#${acceptedBid.barber_id}`}
+            </Text>
+            <Text style={{ color: palette.text }}>
+              Valor acordado: ${acceptedBid.amount.toLocaleString("es-CO")} COP
+            </Text>
           </View>
         )}
 
@@ -534,31 +884,152 @@ export default function ClientStatus() {
         {serviceActive && (
           <View style={{ flexDirection: "row", gap: 10 }}>
             <TouchableOpacity
-              onPress={() => router.push({ pathname: "/chat/[serviceRequestId]", params: { serviceRequestId: String(request.id), otherUserName: acceptedBid?.name || "Profesional" } })}
-              style={{ flex: 1, backgroundColor: "#0d1b2e", padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "#4a90e2", alignItems: "center" }}
+              onPress={() =>
+                router.push({
+                  pathname: "/chat/[serviceRequestId]",
+                  params: {
+                    serviceRequestId: String(request.id),
+                    otherUserName: acceptedBid?.name || "Profesional",
+                  },
+                })
+              }
+              style={{
+                flex: 1,
+                backgroundColor: "#0d1b2e",
+                padding: 16,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: "#4a90e2",
+                alignItems: "center",
+              }}
             >
-              <Text style={{ color: "#4a90e2", fontWeight: "700" }}>💬 Chat</Text>
+              <Text style={{ color: "#4a90e2", fontWeight: "700" }}>
+                💬 Chat
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => { const phone = acceptedBid?.phone; if (phone) Linking.openURL("tel:" + phone); else Alert.alert("No disponible", "Usa el chat."); }}
-              style={{ flex: 1, backgroundColor: "#0a2a0a", padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "#4caf50", alignItems: "center" }}
+              onPress={() => {
+                const phone = acceptedBid?.phone;
+                if (phone) Linking.openURL("tel:" + phone);
+                else Alert.alert("No disponible", "Usa el chat.");
+              }}
+              style={{
+                flex: 1,
+                backgroundColor: "#0a2a0a",
+                padding: 16,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: "#4caf50",
+                alignItems: "center",
+              }}
             >
-              <Text style={{ color: "#4caf50", fontWeight: "700" }}>📞 Llamar</Text>
+              <Text style={{ color: "#4caf50", fontWeight: "700" }}>
+                📞 Llamar
+              </Text>
             </TouchableOpacity>
           </View>
         )}
 
-        <TouchableOpacity onPress={loadStatus} style={{ backgroundColor: palette.primary, padding: 12, borderRadius: 8, alignItems: "center" }}>
-          <Text style={{ color: "#000", fontWeight: "700" }}>Actualizar estado</Text>
+        <TouchableOpacity
+          onPress={loadStatus}
+          style={{
+            backgroundColor: palette.primary,
+            padding: 12,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: "#000", fontWeight: "700" }}>
+            Actualizar estado
+          </Text>
         </TouchableOpacity>
 
-        {["open", "accepted", "on_route", "arrived"].includes(request.status || "") && (
-          <TouchableOpacity onPress={cancelService} style={{ borderWidth: 1, borderColor: "#dd0000", padding: 12, borderRadius: 8, alignItems: "center" }}>
+        {/* ── Servicio expirado — opción de republicar ── */}
+        {request.status === "expired" && (
+          <View
+            style={{
+              backgroundColor: "#1a0d00",
+              borderRadius: 14,
+              padding: 20,
+              borderWidth: 2,
+              borderColor: "#FF6B35",
+              gap: 12,
+            }}
+          >
+            <Text style={{ color: "#FF6B35", fontWeight: "900", fontSize: 16 }}>
+              ⏰ Sin profesionales disponibles
+            </Text>
+            <Text style={{ color: "#aaa", fontSize: 13, lineHeight: 20 }}>
+              Tu solicitud estuvo 10 minutos sin ser aceptada. Puedes
+              republicarla para que los profesionales la vean de nuevo.
+            </Text>
+            <Text style={{ color: "#888", fontSize: 12 }}>
+              💡 Consejo: considera aumentar el precio para atraer más
+              profesionales.
+            </Text>
+            <TouchableOpacity
+              onPress={republishService}
+              style={{
+                backgroundColor: "#FF6B35",
+                padding: 14,
+                borderRadius: 10,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}>
+                🔄 Volver a publicar
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  // Eliminar el servicio expirado de la BD
+                  await api.patch(`/service-requests/${request.id}/status`, {
+                    status: "cancelled",
+                  });
+                } catch {}
+                router.replace("/client/home");
+              }}
+              style={{
+                borderWidth: 1,
+                borderColor: "#555",
+                padding: 12,
+                borderRadius: 8,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#888" }}>Cancelar y volver al inicio</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {["open", "accepted", "on_route", "arrived"].includes(
+          request.status || "",
+        ) && (
+          <TouchableOpacity
+            onPress={cancelService}
+            style={{
+              borderWidth: 1,
+              borderColor: "#dd0000",
+              padding: 12,
+              borderRadius: 8,
+              alignItems: "center",
+            }}
+          >
             <Text style={{ color: "#dd0000" }}>Cancelar servicio</Text>
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity onPress={() => router.replace("/client/home")} style={{ borderWidth: 1, borderColor: "#555", padding: 12, borderRadius: 8, alignItems: "center" }}>
+        <TouchableOpacity
+          onPress={() => router.replace("/client/home")}
+          style={{
+            borderWidth: 1,
+            borderColor: "#555",
+            padding: 12,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
           <Text style={{ color: "#aaa" }}>Volver al inicio</Text>
         </TouchableOpacity>
       </View>
