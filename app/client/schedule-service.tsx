@@ -110,6 +110,17 @@ export default function ScheduleService() {
     const scheduled = new Date(selectedDate);
     scheduled.setHours(hh, mm, 0, 0);
 
+    // Validar mínimo 1 hora desde ahora
+    const minTime = new Date();
+    minTime.setHours(minTime.getHours() + 1);
+    if (scheduled < minTime) {
+      Alert.alert(
+        "Hora no válida",
+        "El servicio debe agendarse con mínimo 1 hora de anticipación. Selecciona una hora posterior.",
+      );
+      return;
+    }
+
     router.push({
       pathname: "/client/create-service" as any,
       params: {
@@ -257,22 +268,46 @@ export default function ScheduleService() {
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {HOURS.map((h) => {
           const sel = selectedHour === h;
+
+          // Verificar si la hora ya pasó o está dentro de la próxima hora
+          const [hh] = h.split(":").map(Number);
+          const now = new Date();
+          const minTime = new Date();
+          minTime.setHours(now.getHours() + 1, now.getMinutes(), 0, 0);
+
+          let isPast = false;
+          if (selectedDate) {
+            const candidate = new Date(selectedDate);
+            candidate.setHours(hh, 0, 0, 0);
+            isPast = candidate < minTime;
+          }
+
           return (
             <TouchableOpacity
               key={h}
-              onPress={() => setSelectedHour(h)}
+              onPress={() => !isPast && setSelectedHour(h)}
+              disabled={isPast}
               style={{
-                backgroundColor: sel ? palette.primary : palette.card,
+                backgroundColor: sel
+                  ? palette.primary
+                  : isPast
+                    ? "#1a1a1a"
+                    : palette.card,
                 borderRadius: 8,
                 paddingVertical: 10,
                 paddingHorizontal: 16,
                 borderWidth: 1,
-                borderColor: sel ? palette.primary : "#333",
+                borderColor: sel
+                  ? palette.primary
+                  : isPast
+                    ? "#2a2a2a"
+                    : "#333",
+                opacity: isPast ? 0.4 : 1,
               }}
             >
               <Text
                 style={{
-                  color: sel ? "#000" : palette.text,
+                  color: sel ? "#000" : isPast ? "#444" : palette.text,
                   fontWeight: sel ? "900" : "400",
                 }}
               >
