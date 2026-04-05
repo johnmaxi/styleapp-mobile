@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.johnarelop.styleapp",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#000000"
@@ -51,7 +52,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "StyleApp necesita tu ubicación para conectarte con clientes cercanos."
+          "locationAlwaysAndWhenInUsePermission": "StyleApp necesita tu ubicacion para conectarte con profesionales cercanos."
         }
       ],
       "expo-font",
