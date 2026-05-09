@@ -5,6 +5,7 @@ import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { getPalette } from "@/utils/palette";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
@@ -19,16 +20,9 @@ type ActiveRequest = {
   status?: string;
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  open: "Buscando profesional",
-  accepted: "Profesional asignado",
-  on_route: "Profesional en camino",
-  arrived: "Profesional llegó",
-  expired: "⏰ Sin profesionales — toca para republicar",
-};
-
 export default function ClientHome() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const palette = getPalette(user?.gender);
 
@@ -37,9 +31,8 @@ export default function ClientHome() {
   );
   const [checking, setChecking] = useState(true);
 
-  const displayName = user?.name?.split(" ")[0] || "Cliente";
+  const displayName = user?.name?.split(" ")[0] || t("register.client");
 
-  // ── Recibir notificaciones push (advertencia + expiración) ────────────
   usePushNotifications(user?.id, user?.role);
 
   useFocusEffect(
@@ -57,7 +50,6 @@ export default function ClientHome() {
               const rows: ActiveRequest[] = Array.isArray(res.data)
                 ? res.data
                 : res.data?.data || [];
-              // Incluir expired para mostrar opción de republicar
               const active = rows.find(
                 (r) => r.status !== "completed" && r.status !== "cancelled",
               );
@@ -89,10 +81,10 @@ export default function ClientHome() {
   };
 
   const handleLogout = () => {
-    Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
-      { text: "Cancelar", style: "cancel" },
+    Alert.alert(t("profile.logout"), t("common.confirm") + "?", [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Salir",
+        text: t("common.yes"),
         style: "destructive",
         onPress: async () => {
           try {
@@ -102,6 +94,14 @@ export default function ClientHome() {
         },
       },
     ]);
+  };
+
+  const STATUS_LABEL: Record<string, string> = {
+    open: t("client.status.searching"),
+    accepted: t("client.status.accepted"),
+    on_route: t("client.status.onRoute"),
+    arrived: t("client.status.arrived"),
+    expired: t("client.status.cancelled"),
   };
 
   if (checking) {
@@ -141,10 +141,10 @@ export default function ClientHome() {
         STYLEAPP
       </Text>
       <Text style={{ fontSize: 20, color: palette.text, marginBottom: 8 }}>
-        Bienvenido, {displayName}
+        {t("client.home.title")}, {displayName}
       </Text>
 
-      {/* ── Banner servicio activo ── */}
+      {/* Banner servicio activo */}
       {activeRequest && !isExpired && (
         <TouchableOpacity
           onPress={goToStatus}
@@ -158,7 +158,7 @@ export default function ClientHome() {
           }}
         >
           <Text style={{ color: "#4caf50", fontWeight: "900", fontSize: 15 }}>
-            Servicio en curso
+            {t("client.home.activeService")}
           </Text>
           <Text style={{ color: "#aaa", marginTop: 4, fontSize: 13 }}>
             {activeRequest.service_type} —{" "}
@@ -172,12 +172,12 @@ export default function ClientHome() {
               fontSize: 13,
             }}
           >
-            Toca para gestionar tu solicitud
+            {t("client.home.goToService")}
           </Text>
         </TouchableOpacity>
       )}
 
-      {/* ── Banner servicio expirado ── */}
+      {/* Banner servicio expirado */}
       {isExpired && (
         <TouchableOpacity
           onPress={goToStatus}
@@ -191,10 +191,10 @@ export default function ClientHome() {
           }}
         >
           <Text style={{ color: "#FF6B35", fontWeight: "900", fontSize: 15 }}>
-            ⏰ Servicio sin profesionales
+            ⏰ {t("client.status.cancelled")}
           </Text>
           <Text style={{ color: "#aaa", marginTop: 4, fontSize: 13 }}>
-            {activeRequest?.service_type} — Nadie aceptó la solicitud
+            {activeRequest?.service_type}
           </Text>
           <Text
             style={{
@@ -204,12 +204,12 @@ export default function ClientHome() {
               fontSize: 13,
             }}
           >
-            Toca para volver a publicarlo →
+            {t("client.home.goToService")}
           </Text>
         </TouchableOpacity>
       )}
 
-      {/* ── Solicitar / continuar ── */}
+      {/* Solicitar / continuar */}
       <TouchableOpacity
         onPress={() => {
           if (activeRequest) goToStatus();
@@ -226,10 +226,10 @@ export default function ClientHome() {
       >
         <Text style={{ color: palette.text, fontWeight: "700" }}>
           {activeRequest && !isExpired
-            ? "Continuar solicitud activa"
+            ? t("client.status.accepted")
             : isExpired
-              ? "🔄 Republicar servicio"
-              : "✂️ Solicitar servicio"}
+              ? "🔄 " + t("client.home.requestService")
+              : "✂️ " + t("client.home.requestService")}
         </Text>
       </TouchableOpacity>
 
@@ -246,12 +246,12 @@ export default function ClientHome() {
           }}
         >
           <Text style={{ color: palette.text, fontWeight: "700" }}>
-            Estado de mi solicitud
+            {t("client.status.title")}
           </Text>
         </TouchableOpacity>
       )}
 
-      {/* ── IA para cortes de cabello ── */}
+      {/* IA cortes */}
       <TouchableOpacity
         onPress={() => router.push("/client/haircut-ai" as any)}
         style={{
@@ -268,15 +268,16 @@ export default function ClientHome() {
         <Text style={{ fontSize: 28 }}>🤖</Text>
         <View style={{ flex: 1 }}>
           <Text style={{ color: "#4a90e2", fontWeight: "900", fontSize: 14 }}>
-            IA: Descubre tu corte ideal
+            IA: {t("client.selectType.title")}
           </Text>
           <Text style={{ color: "#666", fontSize: 11, marginTop: 2 }}>
-            Sube tu foto y recibe recomendaciones personalizadas
+            {t("client.createService.addressPlaceholder")}
           </Text>
         </View>
         <Text style={{ color: "#4a90e2", fontSize: 18 }}>→</Text>
       </TouchableOpacity>
 
+      {/* Mis citas */}
       <TouchableOpacity
         onPress={() => router.push("/client/bookings" as any)}
         style={{
@@ -289,10 +290,11 @@ export default function ClientHome() {
         }}
       >
         <Text style={{ color: "#2196F3", fontWeight: "700" }}>
-          📅 Mis Citas Programadas
+          📅 {t("client.home.myBookings")}
         </Text>
       </TouchableOpacity>
 
+      {/* Mi perfil */}
       <TouchableOpacity
         onPress={() => router.push("/profile")}
         style={{
@@ -305,10 +307,11 @@ export default function ClientHome() {
         }}
       >
         <Text style={{ color: palette.text, fontWeight: "700" }}>
-          Mi perfil
+          {t("profile.title")}
         </Text>
       </TouchableOpacity>
 
+      {/* Cerrar sesión */}
       <TouchableOpacity
         onPress={handleLogout}
         style={{
@@ -321,7 +324,7 @@ export default function ClientHome() {
         }}
       >
         <Text style={{ color: "#dd0000", fontWeight: "700" }}>
-          Cerrar sesion
+          {t("profile.logout")}
         </Text>
       </TouchableOpacity>
     </View>

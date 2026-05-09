@@ -1,6 +1,8 @@
 // app/profile.tsx
+import LanguageSelector from "@/components/LanguageSelector";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Image,
@@ -17,6 +19,7 @@ type Request = { status?: string; price?: number };
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<Request[]>([]);
@@ -27,7 +30,6 @@ export default function ProfileScreen() {
   useEffect(() => {
     (async () => {
       try {
-        // Cargar perfil completo
         for (const endpoint of [
           `/usuarios/me/${user?.id}`,
           `/users/me`,
@@ -38,7 +40,6 @@ export default function ProfileScreen() {
             const data = profileRes?.data?.user ?? profileRes?.data;
             if (data && (data.name || data.email || data.profile_photo)) {
               setProfileData(data);
-              // Saldo desde el perfil si viene incluido
               if (data.balance !== undefined && data.balance !== null) {
                 setBalance(Number(data.balance));
               }
@@ -47,7 +48,6 @@ export default function ProfileScreen() {
           } catch {}
         }
 
-        // Cargar saldo explícitamente
         try {
           const balRes = await api.get("/payments/balance");
           if (balRes?.data?.balance !== undefined) {
@@ -55,7 +55,6 @@ export default function ProfileScreen() {
           }
         } catch {}
 
-        // Cargar solicitudes
         const PROFESSIONAL_ROLES = ["barber", "estilista", "quiropodologo"];
         if (PROFESSIONAL_ROLES.includes(user?.role || "")) {
           try {
@@ -113,20 +112,19 @@ export default function ProfileScreen() {
   const displayName =
     profileData?.name || user?.name || user?.email || "Usuario";
 
-  // Color del saldo: verde >= 5000, rojo < 5000
   const balanceColor = balance >= 5000 ? "#22C55E" : "#EF4444";
   const balanceBg = balance >= 5000 ? "#14532D" : "#450A0A";
   const balanceBorder = balance >= 5000 ? "#16A34A" : "#B91C1C";
   const balanceIcon = balance >= 5000 ? "💰" : "⚠️";
   const balanceLabel =
-    balance >= 5000 ? "Saldo disponible" : "Saldo insuficiente";
+    balance >= 5000 ? t("payments.available") : t("payments.balance");
 
   const ROLE_LABELS: Record<string, string> = {
-    client: "Cliente",
-    barber: "Barbero",
-    estilista: "Estilista",
-    quiropodologo: "Quiropodologo",
-    admin: "Administrador",
+    client: t("register.client"),
+    barber: t("professional.home.title"),
+    estilista: t("client.selectType.stylist"),
+    quiropodologo: t("client.selectType.podologist"),
+    admin: "Admin",
   };
 
   return (
@@ -146,7 +144,7 @@ export default function ProfileScreen() {
           marginBottom: 4,
         }}
       >
-        Mi perfil
+        {t("profile.title")}
       </Text>
 
       {/* FOTO + NOMBRE */}
@@ -200,6 +198,14 @@ export default function ProfileScreen() {
         )}
       </View>
 
+      {/* ── SELECTOR DE IDIOMA ── */}
+      <View>
+        <Text style={{ color: "#888", fontSize: 12, marginBottom: 6 }}>
+          {t("common.language")}
+        </Text>
+        <LanguageSelector palette={palette} />
+      </View>
+
       {/* ── SALDO ── */}
       <View
         style={{
@@ -236,7 +242,7 @@ export default function ProfileScreen() {
               marginTop: 2,
             }}
           >
-            Recarga saldo para poder solicitar servicios
+            {t("client.createService.price")}
           </Text>
         )}
       </View>
@@ -252,7 +258,7 @@ export default function ProfileScreen() {
         onPress={() => router.push("/recharge" as any)}
       >
         <Text style={{ color: "#000", fontWeight: "900", fontSize: 15 }}>
-          + Recargar saldo
+          + {t("payments.recharge")}
         </Text>
       </TouchableOpacity>
 
@@ -268,7 +274,7 @@ export default function ProfileScreen() {
         <Text
           style={{ color: palette.text, fontWeight: "700", marginBottom: 8 }}
         >
-          Calificacion
+          {t("rating.title")}
         </Text>
         <View style={{ flexDirection: "row", gap: 4 }}>
           {[1, 2, 3, 4, 5].map((star) => (
@@ -301,13 +307,13 @@ export default function ProfileScreen() {
         <Text style={{ color: "#aaa", fontSize: 13, marginTop: 8 }}>
           {rating > 0
             ? `${Number(rating).toFixed(1)} / 5`
-            : "Sin calificaciones aun"}
+            : t("rating.howWasService")}
         </Text>
       </View>
 
       {/* RESUMEN */}
       <Text style={{ color: palette.text, fontWeight: "700", marginTop: 4 }}>
-        Resumen de actividad
+        {t("profile.history")}
       </Text>
       <View
         style={{
@@ -317,19 +323,19 @@ export default function ProfileScreen() {
           gap: 6,
         }}
       >
-        <Text style={{ color: palette.text }}>
-          Total servicios: {summary.total}
-        </Text>
+        <Text style={{ color: palette.text }}>Total: {summary.total}</Text>
         {user?.role === "client" && (
-          <Text style={{ color: palette.text }}>Abiertos: {summary.open}</Text>
+          <Text style={{ color: palette.text }}>
+            {t("client.status.searching")}: {summary.open}
+          </Text>
         )}
         {user?.role === "client" && (
           <Text style={{ color: palette.text }}>
-            En curso: {summary.accepted}
+            {t("client.status.accepted")}: {summary.accepted}
           </Text>
         )}
         <Text style={{ color: palette.text }}>
-          Completados: {summary.completed}
+          {t("client.status.completed")}: {summary.completed}
         </Text>
         <Text style={{ color: palette.primary, fontWeight: "700" }}>
           {user?.role === "client" ? "Total gastado" : "Total ganado"}: $
@@ -348,7 +354,9 @@ export default function ProfileScreen() {
             alignItems: "center",
           }}
         >
-          <Text style={{ color: palette.text }}>Crear nueva solicitud</Text>
+          <Text style={{ color: palette.text }}>
+            {t("client.home.requestService")}
+          </Text>
         </TouchableOpacity>
       )}
 
@@ -363,7 +371,7 @@ export default function ProfileScreen() {
             alignItems: "center",
           }}
         >
-          <Text style={{ color: palette.text }}>Panel de administracion</Text>
+          <Text style={{ color: palette.text }}>Panel de administración</Text>
         </TouchableOpacity>
       )}
 
@@ -378,7 +386,7 @@ export default function ProfileScreen() {
           alignItems: "center",
         }}
       >
-        <Text style={{ color: "#aaa" }}>Volver</Text>
+        <Text style={{ color: "#aaa" }}>{t("common.back")}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
