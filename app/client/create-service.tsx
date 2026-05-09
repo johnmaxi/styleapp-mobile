@@ -11,6 +11,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Alert,
   Modal,
@@ -43,6 +44,7 @@ const MP_METHODS = ["pse", "tarjeta"];
 export default function CreateService() {
   const router = useRouter();
   const { user } = useAuth();
+  const { t } = useTranslation();
   const palette = getPalette(user?.gender);
 
   // ── Leer params del flujo anterior ───────────────────────────────────
@@ -448,7 +450,7 @@ export default function CreateService() {
         `Para pagar con ${paymentMethod === "pse" ? "PSE" : "Tarjeta"} debes completar el pago por MercadoPago antes de publicar.`,
         [
           { text: "Pagar ahora", onPress: handleMPPayment },
-          { text: "Cancelar", style: "cancel" },
+          { text: t("common.cancel"), style: "cancel" },
         ],
       );
       return;
@@ -479,7 +481,9 @@ export default function CreateService() {
           marginBottom: 8,
         }}
       >
-        {isScheduled ? "📅 Agendar servicio" : "Solicitar servicio"}
+        {isScheduled
+          ? `📅 ${t("client.createService.scheduledTitle")}`
+          : t("client.createService.title")}
       </Text>
 
       {/* ── BADGE AGENDAMIENTO ── */}
@@ -808,8 +812,8 @@ export default function CreateService() {
       >
         <Text style={{ color: palette.text }}>
           {geocoding
-            ? "Obteniendo ubicacion..."
-            : "📍 Usar mi ubicacion actual (GPS)"}
+            ? t("client.createService.locating")
+            : `📍 ${t("client.createService.useLocation")}`}
         </Text>
       </TouchableOpacity>
 
@@ -845,7 +849,7 @@ export default function CreateService() {
           placeholderTextColor="#888"
           keyboardType="numeric"
           value={price ? Number(price).toLocaleString("es-CO") : ""}
-          onChangeText={(t) => setPrice(t.replace(/\D/g, ""))}
+          onChangeText={(txt) => setPrice(txt.replace(/\D/g, ""))}
           style={{ flex: 1, paddingVertical: 12, color: palette.text }}
           editable={!isMPMethod || !mpPaid}
         />
@@ -1001,12 +1005,12 @@ export default function CreateService() {
           }}
         >
           {loading
-            ? "Publicando..."
+            ? t("common.loading")
             : isMPMethod && !mpPaid
               ? "Completa el pago primero"
               : isScheduled
-                ? "Confirmar agendamiento"
-                : "Publicar servicio"}
+                ? t("client.createService.confirmBooking")
+                : t("client.createService.publish")}
         </Text>
       </TouchableOpacity>
 

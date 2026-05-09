@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   ScrollView,
@@ -85,6 +86,7 @@ function getWeekDates(offset = 0) {
 export default function BarberSchedule() {
   const router = useRouter();
   const { user } = useAuth();
+  const { t } = useTranslation();
   const palette = getPalette(user?.gender);
 
   const [weekOffset, setWeekOffset] = useState(0);

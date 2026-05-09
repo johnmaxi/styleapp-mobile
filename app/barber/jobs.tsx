@@ -1,48 +1,68 @@
 // app/barber/jobs.tsx
-import { SERVICE_CATALOG, formatPrice, roleToProType } from "@/constants/services";
+import {
+  SERVICE_CATALOG,
+  formatPrice,
+  roleToProType,
+} from "@/constants/services";
+import { playSound } from "@/utils/sounds";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
-  ActivityIndicator, Alert, ScrollView,
-  Text, TouchableOpacity, View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import api from "../../api";
 import { useAuth } from "../../context/AuthContext";
 import { getPalette } from "../../utils/palette";
-import { playSound } from "@/utils/sounds";
 
 type RequestItem = {
   id: number;
-  service_type?:      string;
+  service_type?: string;
   professional_type?: string;
-  price?:             number;
-  address?:           string;
-  status?:            string;
-  latitude?:          number;
-  longitude?:         number;
-  payment_method?:    string;
-  expires_at?:        string;
-  client_id?:         number;
-  scheduled_at?:      string;
+  price?: number;
+  address?: string;
+  status?: string;
+  latitude?: number;
+  longitude?: number;
+  payment_method?: string;
+  expires_at?: string;
+  client_id?: number;
+  scheduled_at?: string;
 };
 
 type BidStatus = "none" | "pending" | "accepted" | "rejected";
-type MyBidMap  = Record<number, { bidId: number; status: BidStatus; amount: number }>;
+type MyBidMap = Record<
+  number,
+  { bidId: number; status: BidStatus; amount: number }
+>;
 
-function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R    = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a    = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-               Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-               Math.sin(dLng / 2) * Math.sin(dLng / 2);
+function distanceKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function etaText(km: number): string {
   const min = Math.round((km / 25) * 60);
-  if (min < 2)  return "~2 min";
+  if (min < 2) return "~2 min";
   if (min < 60) return `~${min} min`;
   return `~${Math.floor(min / 60)}h ${min % 60}min`;
 }
@@ -53,31 +73,35 @@ function distText(km: number): string {
 
 const PAYMENT_LABELS: Record<string, string> = {
   efectivo: "💵 Efectivo",
-  nequi:    "📱 Nequi",
-  pse:      "🏦 PSE — Precio fijo",
-  tarjeta:  "💳 Tarjeta — Precio fijo",
+  nequi: "📱 Nequi",
+  pse: "🏦 PSE — Precio fijo",
+  tarjeta: "💳 Tarjeta — Precio fijo",
 };
 
 const FIXED_PRICE_METHODS = ["pse", "tarjeta"];
 
 export default function Jobs() {
-  const router   = useRouter();
+  const router = useRouter();
   const { user } = useAuth();
-  const palette  = getPalette(user?.gender);
+  const { t } = useTranslation();
+  const palette = getPalette(user?.gender);
 
-  const [requests,        setRequests]        = useState<RequestItem[]>([]);
-  const [myBidMap,        setMyBidMap]        = useState<MyBidMap>({});
-  const [isActive,        setIsActive]        = useState(true);
-  const [loading,         setLoading]         = useState(true);
+  const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [myBidMap, setMyBidMap] = useState<MyBidMap>({});
+  const [isActive, setIsActive] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
   // ── FIX: declarar myLocation correctamente ────────────────────────────
-  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [myLocation, setMyLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
 
   const notifiedRejected = useRef<Set<number>>(new Set());
   const notifiedAccepted = useRef<Set<number>>(new Set());
-  const prevCountRef     = useRef<number>(-1);
+  const prevCountRef = useRef<number>(-1);
 
-  const proType         = user?.role ? roleToProType(user.role) : null;
+  const proType = user?.role ? roleToProType(user.role) : null;
   const allowedServices = proType
     ? SERVICE_CATALOG[proType].map((s) => s.label.toLowerCase())
     : [];
@@ -86,34 +110,40 @@ export default function Jobs() {
     if (!proType) return [];
     return items.filter((item) => {
       if (item.professional_type) return item.professional_type === proType;
-      if (!item.service_type)     return false;
-      const types = item.service_type.toLowerCase().split(",").map((s) => s.trim());
+      if (!item.service_type) return false;
+      const types = item.service_type
+        .toLowerCase()
+        .split(",")
+        .map((s) => s.trim());
       return types.some((t) =>
-        allowedServices.some((a) => t.includes(a) || a.includes(t))
+        allowedServices.some((a) => t.includes(a) || a.includes(t)),
       );
     });
   };
 
   const loadMyBids = useCallback(async (): Promise<MyBidMap> => {
     try {
-      const res  = await api.get("/bids/my-bids");
+      const res = await api.get("/bids/my-bids");
       const bids: any[] = Array.isArray(res.data)
         ? res.data
         : Array.isArray(res.data?.data)
-        ? res.data.data : [];
+          ? res.data.data
+          : [];
       const map: MyBidMap = {};
       bids.forEach((bid) => {
         const existing = map[bid.service_request_id];
         if (!existing || bid.id > existing.bidId) {
           map[bid.service_request_id] = {
-            bidId:  bid.id,
+            bidId: bid.id,
             status: bid.status as BidStatus,
             amount: Number(bid.amount),
           };
         }
       });
       return map;
-    } catch { return {}; }
+    } catch {
+      return {};
+    }
   }, []);
 
   const loadOpenRequests = useCallback(async () => {
@@ -140,12 +170,13 @@ export default function Jobs() {
       let list: RequestItem[] = [];
       for (const endpoint of endpoints) {
         try {
-          const res     = await api.get(endpoint);
+          const res = await api.get(endpoint);
           const payload = res.data;
           const rows: RequestItem[] = Array.isArray(payload)
             ? payload
             : Array.isArray(payload?.data)
-            ? payload.data : [];
+              ? payload.data
+              : [];
           if (rows.length > 0 || endpoint.includes("open")) {
             list = rows;
             break;
@@ -161,21 +192,37 @@ export default function Jobs() {
       prevCountRef.current = filtered.length;
 
       Object.entries(bidMap).forEach(([reqId, bid]) => {
-        const reqIdNum     = Number(reqId);
-        const req          = filtered.find((r) => r.id === reqIdNum) || list.find((r) => r.id === reqIdNum);
+        const reqIdNum = Number(reqId);
+        const req =
+          filtered.find((r) => r.id === reqIdNum) ||
+          list.find((r) => r.id === reqIdNum);
         const serviceLabel = req?.service_type || `#${reqId}`;
 
-        if (bid.status === "rejected" && !notifiedRejected.current.has(bid.bidId)) {
+        if (
+          bid.status === "rejected" &&
+          !notifiedRejected.current.has(bid.bidId)
+        ) {
           notifiedRejected.current.add(bid.bidId);
-          Alert.alert("Oferta rechazada", `El cliente rechazo tu oferta para "${serviceLabel}".`);
+          Alert.alert(
+            "Oferta rechazada",
+            `El cliente rechazo tu oferta para "${serviceLabel}".`,
+          );
         }
-        if (bid.status === "accepted" && !notifiedAccepted.current.has(bid.bidId)) {
+        if (
+          bid.status === "accepted" &&
+          !notifiedAccepted.current.has(bid.bidId)
+        ) {
           notifiedAccepted.current.add(bid.bidId);
           playSound("service_accepted");
           Alert.alert(
             "¡Oferta aceptada!",
             `El cliente acepto tu oferta para "${serviceLabel}". Ve al servicio activo.`,
-            [{ text: "Ver servicio", onPress: () => router.push("/barber/home") }]
+            [
+              {
+                text: "Ver servicio",
+                onPress: () => router.push("/barber/home"),
+              },
+            ],
           );
         }
       });
@@ -194,12 +241,18 @@ export default function Jobs() {
     Location.getForegroundPermissionsAsync()
       .then(({ status }) => {
         if (status === "granted") {
-          return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          return Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
         }
         return null;
       })
       .then((loc) => {
-        if (loc) setMyLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+        if (loc)
+          setMyLocation({
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+          });
       })
       .catch(() => {});
   }, []);
@@ -221,33 +274,44 @@ export default function Jobs() {
         if (item.scheduled_at) {
           // Servicio programado — queda en agenda, no va a active todavía
           const time = new Date(item.scheduled_at).toLocaleString("es-CO", {
-            weekday: "short", day: "numeric", month: "short",
-            hour: "2-digit", minute: "2-digit",
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
           });
           Alert.alert(
             "✅ Servicio agendado",
             `El servicio fue agendado para ${time}.
 
 Recibirás una notificación 1 hora antes.`,
-            [{ text: "Ver mi agenda", onPress: () => router.push("/barber/schedule" as any) }]
+            [
+              {
+                text: "Ver mi agenda",
+                onPress: () => router.push("/barber/schedule" as any),
+              },
+            ],
           );
         } else {
           Alert.alert("¡Aceptado!", "Servicio asignado. Dirígete al cliente.");
           router.push({
             pathname: "/barber/active",
             params: {
-              id:           String(item.id),
-              service_type: item.service_type  || "",
-              address:      item.address       || "",
-              price:        String(item.price  || 0),
-              status:       "accepted",
-              client_id:    String(res.data?.client_id || item.client_id || ""),
+              id: String(item.id),
+              service_type: item.service_type || "",
+              address: item.address || "",
+              price: String(item.price || 0),
+              status: "accepted",
+              client_id: String(res.data?.client_id || item.client_id || ""),
             },
           });
         }
       }
     } catch (err: any) {
-      Alert.alert("Error", err?.response?.data?.error || "No se pudo aceptar el servicio");
+      Alert.alert(
+        "Error",
+        err?.response?.data?.error || "No se pudo aceptar el servicio",
+      );
     } finally {
       setActionLoadingId(null);
     }
@@ -257,24 +321,38 @@ Recibirás una notificación 1 hora antes.`,
     router.push({
       pathname: "/barber/offer",
       params: {
-        requestId:    String(item.id),
+        requestId: String(item.id),
         currentPrice: String(item.price ?? 0),
-        serviceType:  item.service_type  || "",
-        address:      item.address       || "",
+        serviceType: item.service_type || "",
+        address: item.address || "",
       },
     });
   };
 
-  const BID_BADGE: Record<BidStatus, { label: string; bg: string; color: string }> = {
-    none:     { label: "",                      bg: "transparent", color: "transparent" },
-    pending:  { label: "Tu oferta: pendiente",  bg: "#1a1a00",     color: "#D4AF37"    },
-    accepted: { label: "Tu oferta: aceptada",   bg: "#0a2a0a",     color: "#4caf50"    },
-    rejected: { label: "Tu oferta: rechazada",  bg: "#2a0a0a",     color: "#dd0000"    },
+  const BID_BADGE: Record<
+    BidStatus,
+    { label: string; bg: string; color: string }
+  > = {
+    none: { label: "", bg: "transparent", color: "transparent" },
+    pending: { label: "Tu oferta: pendiente", bg: "#1a1a00", color: "#D4AF37" },
+    accepted: { label: "Tu oferta: aceptada", bg: "#0a2a0a", color: "#4caf50" },
+    rejected: {
+      label: "Tu oferta: rechazada",
+      bg: "#2a0a0a",
+      color: "#dd0000",
+    },
   };
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: palette.background }}>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: palette.background,
+        }}
+      >
         <ActivityIndicator color={palette.primary} size="large" />
       </View>
     );
@@ -282,131 +360,253 @@ Recibirás una notificación 1 hora antes.`,
 
   if (!isActive) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center",
-        backgroundColor: palette.background, padding: 24 }}>
-        <Text style={{ color: "#888", textAlign: "center", fontSize: 16, marginBottom: 16 }}>
-          Estás inactivo. Activa tu disponibilidad desde el inicio para ver solicitudes.
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: palette.background,
+          padding: 24,
+        }}
+      >
+        <Text
+          style={{
+            color: "#888",
+            textAlign: "center",
+            fontSize: 16,
+            marginBottom: 16,
+          }}
+        >
+          Estás inactivo. Activa tu disponibilidad desde el inicio para ver
+          solicitudes.
         </Text>
         <TouchableOpacity
           onPress={() => router.replace("/barber/home")}
-          style={{ borderWidth: 1, borderColor: palette.primary, padding: 14,
-            borderRadius: 10, alignItems: "center" }}
+          style={{
+            borderWidth: 1,
+            borderColor: palette.primary,
+            padding: 14,
+            borderRadius: 10,
+            alignItems: "center",
+          }}
         >
-          <Text style={{ color: palette.primary, fontWeight: "700" }}>Ir al inicio</Text>
+          <Text style={{ color: palette.primary, fontWeight: "700" }}>
+            Ir al inicio
+          </Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={{
-      padding: 20, backgroundColor: palette.background,
-      gap: 14, paddingBottom: 40,
-    }}>
+    <ScrollView
+      contentContainerStyle={{
+        padding: 20,
+        backgroundColor: palette.background,
+        gap: 14,
+        paddingBottom: 40,
+      }}
+    >
       <Text style={{ fontSize: 22, fontWeight: "900", color: palette.text }}>
-        Solicitudes disponibles
+        t("professional.jobs.title")
       </Text>
 
       {requests.length === 0 ? (
-        <View style={{ backgroundColor: palette.card, padding: 20, borderRadius: 12,
-          alignItems: "center", marginTop: 20 }}>
+        <View
+          style={{
+            backgroundColor: palette.card,
+            padding: 20,
+            borderRadius: 12,
+            alignItems: "center",
+            marginTop: 20,
+          }}
+        >
           <Text style={{ color: "#888", fontSize: 16, textAlign: "center" }}>
             No hay solicitudes disponibles ahora.
           </Text>
-          <Text style={{ color: "#555", fontSize: 12, marginTop: 6, textAlign: "center" }}>
+          <Text
+            style={{
+              color: "#555",
+              fontSize: 12,
+              marginTop: 6,
+              textAlign: "center",
+            }}
+          >
             Se actualizan cada 6 segundos automáticamente.
           </Text>
         </View>
       ) : (
         requests.map((item) => {
-          const myBid        = myBidMap[item.id];
-          const bidStatus    = myBid?.status || "none";
-          const alreadySent  = bidStatus === "pending" || bidStatus === "accepted";
-          const isRejected   = bidStatus === "rejected";
-          const isPending    = bidStatus === "pending";
-          const badge        = BID_BADGE[bidStatus];
-          const isFixedPrice = FIXED_PRICE_METHODS.includes(item.payment_method || "");
+          const myBid = myBidMap[item.id];
+          const bidStatus = myBid?.status || "none";
+          const alreadySent =
+            bidStatus === "pending" || bidStatus === "accepted";
+          const isRejected = bidStatus === "rejected";
+          const isPending = bidStatus === "pending";
+          const badge = BID_BADGE[bidStatus];
+          const isFixedPrice = FIXED_PRICE_METHODS.includes(
+            item.payment_method || "",
+          );
 
           // Calcular distancia si tenemos ubicación
           let distInfo: string | null = null;
           if (myLocation && item.latitude && item.longitude) {
-            const km = distanceKm(myLocation.lat, myLocation.lng, item.latitude, item.longitude);
+            const km = distanceKm(
+              myLocation.lat,
+              myLocation.lng,
+              item.latitude,
+              item.longitude,
+            );
             distInfo = `🚗 ${distText(km)} · ${etaText(km)} desde tu ubicación`;
           }
 
           // Tiempo restante
           let timeInfo: { text: string; color: string } | null = null;
           if (item.expires_at) {
-            const remaining = Math.round((new Date(item.expires_at).getTime() - Date.now()) / 60000);
+            const remaining = Math.round(
+              (new Date(item.expires_at).getTime() - Date.now()) / 60000,
+            );
             if (remaining > 0) {
-              timeInfo = { text: `⏰ Expira en ${remaining} min`, color: remaining <= 3 ? "#dd0000" : "#888" };
+              timeInfo = {
+                text: `⏰ Expira en ${remaining} min`,
+                color: remaining <= 3 ? "#dd0000" : "#888",
+              };
             }
           }
 
           return (
-            <View key={item.id} style={{
-              backgroundColor: item.scheduled_at ? "#0a1520" : palette.card,
-              borderRadius: 12, padding: 16,
-              borderWidth: item.scheduled_at ? 2 : 1,
-              borderColor: bidStatus === "accepted" ? "#4caf50"
-                         : bidStatus === "pending"  ? "#D4AF37"
-                         : item.scheduled_at        ? "#2196F3"
-                         : "#333",
-            }}>
-              <Text style={{ color: palette.primary, fontWeight: "700", fontSize: 15, marginBottom: 4 }}>
+            <View
+              key={item.id}
+              style={{
+                backgroundColor: item.scheduled_at ? "#0a1520" : palette.card,
+                borderRadius: 12,
+                padding: 16,
+                borderWidth: item.scheduled_at ? 2 : 1,
+                borderColor:
+                  bidStatus === "accepted"
+                    ? "#4caf50"
+                    : bidStatus === "pending"
+                      ? "#D4AF37"
+                      : item.scheduled_at
+                        ? "#2196F3"
+                        : "#333",
+              }}
+            >
+              <Text
+                style={{
+                  color: palette.primary,
+                  fontWeight: "700",
+                  fontSize: 15,
+                  marginBottom: 4,
+                }}
+              >
                 {item.service_type || "Servicio"}
               </Text>
               <Text style={{ color: "#aaa", fontSize: 13, marginBottom: 4 }}>
                 📍 {item.address || "Sin dirección"}
               </Text>
-              <Text style={{ color: palette.primary, fontWeight: "700", marginBottom: 4 }}>
+              <Text
+                style={{
+                  color: palette.primary,
+                  fontWeight: "700",
+                  marginBottom: 4,
+                }}
+              >
                 💰 {item.price ? formatPrice(item.price) : "Sin precio"}
               </Text>
 
               {distInfo && (
-                <Text style={{ color: "#4a90e2", fontSize: 12, marginBottom: 4 }}>
+                <Text
+                  style={{ color: "#4a90e2", fontSize: 12, marginBottom: 4 }}
+                >
                   {distInfo}
                 </Text>
               )}
 
               {timeInfo && (
-                <Text style={{ color: timeInfo.color, fontSize: 11, marginBottom: 4 }}>
+                <Text
+                  style={{
+                    color: timeInfo.color,
+                    fontSize: 11,
+                    marginBottom: 4,
+                  }}
+                >
                   {timeInfo.text}
                 </Text>
               )}
 
               {/* Badge servicio programado */}
               {item.scheduled_at && (
-                <View style={{
-                  backgroundColor: "#0d1b2e", paddingVertical: 4, paddingHorizontal: 10,
-                  borderRadius: 6, alignSelf: "flex-start", marginBottom: 6,
-                  borderWidth: 1, borderColor: "#2196F3", flexDirection: "row", gap: 6,
-                }}>
-                  <Text style={{ color: "#2196F3", fontSize: 12, fontWeight: "700" }}>
-                    📅 PROGRAMADO — {new Date(item.scheduled_at).toLocaleString("es-CO", {
-                      weekday: "short", day: "numeric", month: "short",
-                      hour: "2-digit", minute: "2-digit",
+                <View
+                  style={{
+                    backgroundColor: "#0d1b2e",
+                    paddingVertical: 4,
+                    paddingHorizontal: 10,
+                    borderRadius: 6,
+                    alignSelf: "flex-start",
+                    marginBottom: 6,
+                    borderWidth: 1,
+                    borderColor: "#2196F3",
+                    flexDirection: "row",
+                    gap: 6,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#2196F3",
+                      fontSize: 12,
+                      fontWeight: "700",
+                    }}
+                  >
+                    📅 PROGRAMADO —{" "}
+                    {new Date(item.scheduled_at).toLocaleString("es-CO", {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
                     })}
                   </Text>
                 </View>
               )}
 
               {item.payment_method && (
-                <Text style={{ color: isFixedPrice ? "#D4AF37" : "#888", fontSize: 12, marginBottom: 6 }}>
+                <Text
+                  style={{
+                    color: isFixedPrice ? "#D4AF37" : "#888",
+                    fontSize: 12,
+                    marginBottom: 6,
+                  }}
+                >
                   {PAYMENT_LABELS[item.payment_method] || item.payment_method}
                   {isFixedPrice ? " — sin contraofertas" : ""}
                 </Text>
               )}
 
               {bidStatus !== "none" && (
-                <View style={{
-                  backgroundColor: badge.bg, paddingVertical: 4, paddingHorizontal: 10,
-                  borderRadius: 6, alignSelf: "flex-start", marginBottom: 8,
-                  borderWidth: 1, borderColor: badge.color + "55",
-                }}>
-                  <Text style={{ color: badge.color, fontSize: 12, fontWeight: "700" }}>
+                <View
+                  style={{
+                    backgroundColor: badge.bg,
+                    paddingVertical: 4,
+                    paddingHorizontal: 10,
+                    borderRadius: 6,
+                    alignSelf: "flex-start",
+                    marginBottom: 8,
+                    borderWidth: 1,
+                    borderColor: badge.color + "55",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: badge.color,
+                      fontSize: 12,
+                      fontWeight: "700",
+                    }}
+                  >
                     {badge.label}
-                    {myBid?.amount ? ` — $${myBid.amount.toLocaleString("es-CO")}` : ""}
+                    {myBid?.amount
+                      ? ` — $${myBid.amount.toLocaleString("es-CO")}`
+                      : ""}
                   </Text>
                 </View>
               )}
@@ -417,12 +617,17 @@ Recibirás una notificación 1 hora antes.`,
                     onPress={() => handleAccept(item)}
                     disabled={actionLoadingId === item.id}
                     style={{
-                      flex: 1, backgroundColor: "#0A7E07",
-                      paddingVertical: 10, borderRadius: 8, alignItems: "center",
+                      flex: 1,
+                      backgroundColor: "#0A7E07",
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      alignItems: "center",
                     }}
                   >
                     <Text style={{ color: "#fff", fontWeight: "700" }}>
-                      {actionLoadingId === item.id ? "..." : "Aceptar precio"}
+                      {actionLoadingId === item.id
+                        ? "..."
+                        : t("professional.jobs.accept")}
                     </Text>
                   </TouchableOpacity>
 
@@ -430,13 +635,19 @@ Recibirás una notificación 1 hora antes.`,
                     <TouchableOpacity
                       onPress={() => handleCounterOffer(item)}
                       style={{
-                        flex: 1, backgroundColor: "transparent",
-                        borderWidth: 1, borderColor: palette.primary,
-                        paddingVertical: 10, borderRadius: 8, alignItems: "center",
+                        flex: 1,
+                        backgroundColor: "transparent",
+                        borderWidth: 1,
+                        borderColor: palette.primary,
+                        paddingVertical: 10,
+                        borderRadius: 8,
+                        alignItems: "center",
                       }}
                     >
                       <Text style={{ color: palette.text }}>
-                        {isRejected ? "Nueva oferta" : "Contraoferta"}
+                        {isRejected
+                          ? t("professional.jobs.newOffer")
+                          : t("professional.jobs.counter")}
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -444,7 +655,14 @@ Recibirás una notificación 1 hora antes.`,
               )}
 
               {isPending && (
-                <Text style={{ color: "#aaa", fontSize: 12, marginTop: 8, textAlign: "center" }}>
+                <Text
+                  style={{
+                    color: "#aaa",
+                    fontSize: 12,
+                    marginTop: 8,
+                    textAlign: "center",
+                  }}
+                >
                   Esperando respuesta del cliente...
                 </Text>
               )}
@@ -455,16 +673,26 @@ Recibirás una notificación 1 hora antes.`,
 
       <TouchableOpacity
         onPress={loadOpenRequests}
-        style={{ backgroundColor: palette.primary, padding: 12,
-          borderRadius: 8, marginTop: 4, alignItems: "center" }}
+        style={{
+          backgroundColor: palette.primary,
+          padding: 12,
+          borderRadius: 8,
+          marginTop: 4,
+          alignItems: "center",
+        }}
       >
         <Text style={{ color: "#000", fontWeight: "700" }}>Actualizar</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         onPress={() => router.replace("/barber/home")}
-        style={{ borderWidth: 1, borderColor: "#999", padding: 12,
-          borderRadius: 8, alignItems: "center" }}
+        style={{
+          borderWidth: 1,
+          borderColor: "#999",
+          padding: 12,
+          borderRadius: 8,
+          alignItems: "center",
+        }}
       >
         <Text style={{ color: "#aaa" }}>Volver al inicio</Text>
       </TouchableOpacity>

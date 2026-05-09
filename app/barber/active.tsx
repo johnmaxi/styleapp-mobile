@@ -8,6 +8,7 @@ import database from "@react-native-firebase/database";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Alert,
   Linking,
@@ -47,20 +48,23 @@ const PAYMENT_LABELS: Record<string, string> = {
   tarjeta: "Tarjeta",
 };
 
-const STATUS_INFO: Record<string, { label: string; color: string }> = {
-  accepted: { label: "Dirígete al cliente", color: "#D4AF37" },
-  on_route: { label: "En camino al cliente", color: "#2196F3" },
-  arrived: { label: "Llegaste al cliente", color: "#9C27B0" },
-  completed: { label: "Servicio completado", color: "#4caf50" },
-  cancelled: { label: "Servicio cancelado", color: "#dd0000" },
-};
+// STATUS_INFO moved inside component to access t()
 
 const REQUIRES_CASH_CONFIRM = ["efectivo", "nequi"];
 
 export default function BarberActive() {
   const router = useRouter();
   const { user } = useAuth();
+  const { t } = useTranslation();
   const palette = getPalette(user?.gender);
+
+  const STATUS_INFO: Record<string, { label: string; color: string }> = {
+    accepted: { label: t("professional.active.goToClient"), color: "#D4AF37" },
+    on_route: { label: t("professional.active.onRoute"), color: "#2196F3" },
+    arrived: { label: t("professional.active.arrived"), color: "#9C27B0" },
+    completed: { label: t("client.status.completed"), color: "#4caf50" },
+    cancelled: { label: t("client.status.cancelled"), color: "#dd0000" },
+  };
   const params = useLocalSearchParams<{
     id: string;
     service_type?: string;
@@ -427,7 +431,7 @@ export default function BarberActive() {
       setPaymentModal(true);
     } else {
       Alert.alert(
-        "Finalizar servicio",
+        t("professional.active.finish"),
         "¿Confirmas que el servicio fue completado?",
         [
           { text: "Cancelar", style: "cancel" },
@@ -584,7 +588,7 @@ export default function BarberActive() {
             {clientCoords && (
               <Marker
                 coordinate={clientCoords}
-                title="Cliente"
+                title={t("professional.active.client")}
                 description={request?.address}
                 anchor={{ x: 0.5, y: 1.0 }}
                 tracksViewChanges={false}
@@ -654,7 +658,9 @@ export default function BarberActive() {
             {statusInfo.label}
           </Text>
           <Text style={{ color: palette.text }}>
-            {request?.service_type || params.service_type || "Servicio"}
+            {request?.service_type ||
+              params.service_type ||
+              t("professional.active.service")}
           </Text>
           <Text style={{ color: "#aaa", fontSize: 13 }}>
             📍 {request?.address || params.address || "Sin dirección"}
@@ -695,7 +701,8 @@ export default function BarberActive() {
                 pathname: "/chat/[serviceRequestId]",
                 params: {
                   serviceRequestId: String(request?.id),
-                  otherUserName: clientInfo?.name || "Cliente",
+                  otherUserName:
+                    clientInfo?.name || t("professional.active.client"),
                 },
               })
             }
