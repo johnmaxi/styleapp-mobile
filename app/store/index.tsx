@@ -78,6 +78,8 @@ export default function StoreScreen() {
   const [orders, setOrders] = useState<any[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [gettingLoc, setGettingLoc] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedImgIdx, setSelectedImgIdx] = useState(0);
 
   // Checkout
   const [address, setAddress] = useState(user?.address || "");
@@ -417,43 +419,51 @@ export default function StoreScreen() {
                     overflow: "hidden",
                   }}
                 >
-                  <View
-                    style={{
-                      height: 120,
-                      backgroundColor: "#0d1520",
-                      justifyContent: "center",
-                      alignItems: "center",
+                  {/* Toca imagen para ver detalle */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSelectedProduct(product);
+                      setSelectedImgIdx(0);
                     }}
                   >
-                    {firstImage ? (
-                      <Image
-                        source={{ uri: firstImage }}
-                        style={{ width: "100%", height: 120 }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Text style={{ fontSize: 40 }}>
-                        {getCategoryIcon(product.category)}
-                      </Text>
-                    )}
-                    {images.length > 1 && (
-                      <View
-                        style={{
-                          position: "absolute",
-                          bottom: 4,
-                          right: 4,
-                          backgroundColor: "#000000aa",
-                          borderRadius: 10,
-                          paddingHorizontal: 6,
-                          paddingVertical: 2,
-                        }}
-                      >
-                        <Text style={{ color: "#fff", fontSize: 9 }}>
-                          +{images.length - 1} fotos
+                    <View
+                      style={{
+                        height: 120,
+                        backgroundColor: "#0d1520",
+                        justifyContent: "center",
+                        alignItems: "center",
+                      }}
+                    >
+                      {firstImage ? (
+                        <Image
+                          source={{ uri: firstImage }}
+                          style={{ width: "100%", height: 120 }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text style={{ fontSize: 40 }}>
+                          {getCategoryIcon(product.category)}
                         </Text>
-                      </View>
-                    )}
-                  </View>
+                      )}
+                      {images.length > 1 && (
+                        <View
+                          style={{
+                            position: "absolute",
+                            bottom: 4,
+                            right: 4,
+                            backgroundColor: "#000000aa",
+                            borderRadius: 10,
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                          }}
+                        >
+                          <Text style={{ color: "#fff", fontSize: 9 }}>
+                            +{images.length - 1} fotos
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </TouchableOpacity>
 
                   <View style={{ padding: 10, gap: 4 }}>
                     {product.category && (
@@ -592,6 +602,400 @@ export default function StoreScreen() {
           </View>
         </ScrollView>
       )}
+
+      {/* ── MODAL DETALLE PRODUCTO ── */}
+      <Modal visible={!!selectedProduct} transparent animationType="slide">
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#000000cc",
+            justifyContent: "flex-end",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#111",
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              maxHeight: "92%",
+              overflow: "hidden",
+            }}
+          >
+            {selectedProduct &&
+              (() => {
+                let imgs: string[] = [];
+                try {
+                  const parsed = JSON.parse(selectedProduct.image_url || "[]");
+                  imgs = Array.isArray(parsed)
+                    ? parsed
+                    : selectedProduct.image_url
+                      ? [selectedProduct.image_url]
+                      : [];
+                } catch {
+                  imgs = selectedProduct.image_url
+                    ? [selectedProduct.image_url]
+                    : [];
+                }
+                const inCart = cart.find((i) => i.id === selectedProduct.id);
+
+                return (
+                  <ScrollView bounces={false}>
+                    {/* Imagen grande */}
+                    <View style={{ position: "relative" }}>
+                      {imgs.length > 0 ? (
+                        <Image
+                          source={{ uri: imgs[selectedImgIdx] }}
+                          style={{ width: "100%", height: 300 }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={{
+                            width: "100%",
+                            height: 300,
+                            backgroundColor: "#0d1520",
+                            justifyContent: "center",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Text style={{ fontSize: 80 }}>
+                            {getCategoryIcon(selectedProduct.category)}
+                          </Text>
+                        </View>
+                      )}
+                      {/* Botón cerrar */}
+                      <TouchableOpacity
+                        onPress={() => setSelectedProduct(null)}
+                        style={{
+                          position: "absolute",
+                          top: 12,
+                          right: 12,
+                          backgroundColor: "#000000bb",
+                          borderRadius: 20,
+                          width: 36,
+                          height: 36,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 18 }}>✕</Text>
+                      </TouchableOpacity>
+                      {/* Indicadores de imagen */}
+                      {imgs.length > 1 && (
+                        <View
+                          style={{
+                            position: "absolute",
+                            bottom: 12,
+                            left: 0,
+                            right: 0,
+                            flexDirection: "row",
+                            justifyContent: "center",
+                            gap: 6,
+                          }}
+                        >
+                          {imgs.map((_, idx) => (
+                            <TouchableOpacity
+                              key={idx}
+                              onPress={() => setSelectedImgIdx(idx)}
+                            >
+                              <View
+                                style={{
+                                  width: idx === selectedImgIdx ? 20 : 8,
+                                  height: 8,
+                                  borderRadius: 4,
+                                  backgroundColor:
+                                    idx === selectedImgIdx
+                                      ? palette.primary
+                                      : "#ffffff88",
+                                }}
+                              />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                      {/* Miniaturas si hay más de 1 */}
+                      {imgs.length > 1 && (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          style={{
+                            position: "absolute",
+                            bottom: 32,
+                            left: 12,
+                            right: 12,
+                          }}
+                        >
+                          <View style={{ flexDirection: "row", gap: 8 }}>
+                            {imgs.map((img, idx) => (
+                              <TouchableOpacity
+                                key={idx}
+                                onPress={() => setSelectedImgIdx(idx)}
+                              >
+                                <Image
+                                  source={{ uri: img }}
+                                  style={{
+                                    width: 50,
+                                    height: 50,
+                                    borderRadius: 8,
+                                    borderWidth: 2,
+                                    borderColor:
+                                      idx === selectedImgIdx
+                                        ? palette.primary
+                                        : "transparent",
+                                  }}
+                                  resizeMode="cover"
+                                />
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </ScrollView>
+                      )}
+                    </View>
+
+                    {/* Info producto */}
+                    <View style={{ padding: 20, gap: 10 }}>
+                      {selectedProduct.category && (
+                        <Text
+                          style={{
+                            color: "#555",
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: 2,
+                          }}
+                        >
+                          {selectedProduct.category}
+                        </Text>
+                      )}
+                      <Text
+                        style={{
+                          color: palette.text,
+                          fontWeight: "900",
+                          fontSize: 22,
+                          lineHeight: 28,
+                        }}
+                      >
+                        {selectedProduct.name}
+                      </Text>
+                      <Text
+                        style={{
+                          color: palette.primary,
+                          fontWeight: "900",
+                          fontSize: 28,
+                        }}
+                      >
+                        ${Number(selectedProduct.price).toLocaleString("es-CO")}
+                        <Text
+                          style={{
+                            fontSize: 14,
+                            color: "#888",
+                            fontWeight: "400",
+                          }}
+                        >
+                          {" "}
+                          COP
+                        </Text>
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor:
+                              selectedProduct.stock > 0 ? "#4caf50" : "#dd0000",
+                          }}
+                        />
+                        <Text
+                          style={{
+                            color:
+                              selectedProduct.stock > 5
+                                ? "#4caf50"
+                                : selectedProduct.stock > 0
+                                  ? "#FF9800"
+                                  : "#dd0000",
+                            fontSize: 13,
+                          }}
+                        >
+                          {selectedProduct.stock > 0
+                            ? `${selectedProduct.stock} unidades disponibles`
+                            : "Sin stock"}
+                        </Text>
+                      </View>
+
+                      {selectedProduct.description ? (
+                        <View
+                          style={{
+                            backgroundColor: "#0d1520",
+                            borderRadius: 12,
+                            padding: 14,
+                            borderWidth: 1,
+                            borderColor: "#1a2a3a",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: "#888",
+                              fontSize: 11,
+                              fontWeight: "700",
+                              marginBottom: 6,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Descripción
+                          </Text>
+                          <Text
+                            style={{
+                              color: "#ccc",
+                              fontSize: 14,
+                              lineHeight: 22,
+                            }}
+                          >
+                            {selectedProduct.description}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {/* Botón agregar al carrito */}
+                      {inCart ? (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            backgroundColor: "#1a1a1a",
+                            borderRadius: 12,
+                            padding: 8,
+                            marginTop: 4,
+                          }}
+                        >
+                          <TouchableOpacity
+                            onPress={() =>
+                              updateQty(selectedProduct.id, inCart.quantity - 1)
+                            }
+                            style={{
+                              width: 44,
+                              height: 44,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: "#2a0a0a",
+                              borderRadius: 10,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: "#dd0000",
+                                fontSize: 22,
+                                fontWeight: "900",
+                              }}
+                            >
+                              −
+                            </Text>
+                          </TouchableOpacity>
+                          <View style={{ alignItems: "center" }}>
+                            <Text
+                              style={{
+                                color: palette.text,
+                                fontWeight: "900",
+                                fontSize: 20,
+                              }}
+                            >
+                              {inCart.quantity}
+                            </Text>
+                            <Text style={{ color: "#555", fontSize: 11 }}>
+                              en el carrito
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => addToCart(selectedProduct)}
+                            style={{
+                              width: 44,
+                              height: 44,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: "#0a2a0a",
+                              borderRadius: 10,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: "#4caf50",
+                                fontSize: 22,
+                                fontWeight: "900",
+                              }}
+                            >
+                              +
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          onPress={() => {
+                            addToCart(selectedProduct);
+                          }}
+                          disabled={selectedProduct.stock <= 0}
+                          style={{
+                            backgroundColor:
+                              selectedProduct.stock > 0
+                                ? palette.primary
+                                : "#222",
+                            padding: 16,
+                            borderRadius: 12,
+                            alignItems: "center",
+                            marginTop: 4,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color:
+                                selectedProduct.stock > 0 ? "#000" : "#555",
+                              fontWeight: "900",
+                              fontSize: 16,
+                            }}
+                          >
+                            {selectedProduct.stock > 0
+                              ? "🛒 Agregar al carrito"
+                              : "Sin stock"}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {inCart && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedProduct(null);
+                            setShowCart(true);
+                          }}
+                          style={{
+                            borderWidth: 1,
+                            borderColor: palette.primary,
+                            padding: 14,
+                            borderRadius: 12,
+                            alignItems: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: palette.primary,
+                              fontWeight: "700",
+                            }}
+                          >
+                            Ver carrito ({cartCount} items) →
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </ScrollView>
+                );
+              })()}
+          </View>
+        </View>
+      </Modal>
 
       {/* ── MODAL CARRITO ── */}
       <Modal visible={showCart} transparent animationType="slide">
