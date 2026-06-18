@@ -62,7 +62,21 @@ type Professional = {
   registration_status: string;
 };
 
-type Tab = "registros" | "comisiones";
+type RechargeRequest = {
+  id: number;
+  user_id: number;
+  user_name?: string;
+  user_email?: string;
+  user_role?: string;
+  user_phone?: string;
+  amount: number;
+  receipt: string;
+  notes?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+};
+
+type Tab = "registros" | "comisiones" | "recargas";
 
 const ROLE_LABELS: Record<string, string> = {
   barber: "Barbero",
@@ -73,8 +87,6 @@ const ROLE_LABELS: Record<string, string> = {
 const PAYMENT_LABELS: Record<string, string> = {
   efectivo: "💵 Efectivo",
   nequi: "📱 Nequi",
-  pse: "🏦 PSE",
-  tarjeta: "💳 Tarjeta",
 };
 
 function fmtDate(iso: string) {
@@ -121,6 +133,16 @@ export default function AdminScreen() {
   const [imageModal, setImageModal] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
+  // ── Recargas de saldo ──────────────────────────────────────────────────
+  const [recharges, setRecharges] = useState<RechargeRequest[]>([]);
+  const [rechargeFilter, setRechargeFilter] = useState<"pending" | "all">(
+    "pending",
+  );
+  const [rechargeRejectModal, setRechargeRejectModal] = useState(false);
+  const [selectedRecharge, setSelectedRecharge] =
+    useState<RechargeRequest | null>(null);
+  const [rechargeRejectReason, setRechargeRejectReason] = useState("");
+
   const loadPending = async () => {
     try {
       const res = await api.get("/admin/pending-professionals");
@@ -143,15 +165,27 @@ export default function AdminScreen() {
     }
   };
 
+  const loadRecharges = async () => {
+    try {
+      const params = rechargeFilter === "pending" ? "?status=pending" : "";
+      const res = await api.get(`/payments/admin/recharge-requests${params}`);
+      setRecharges(res.data?.data || []);
+    } catch {}
+  };
+
   useEffect(() => {
-    Promise.all([loadPending(), loadCommissions()]).finally(() =>
-      setLoading(false),
+    Promise.all([loadPending(), loadCommissions(), loadRecharges()]).finally(
+      () => setLoading(false),
     );
   }, []);
 
   useEffect(() => {
     loadCommissions();
   }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    loadRecharges();
+  }, [rechargeFilter]);
 
   const handleApprove = (prof: Professional) => {
     Alert.alert(
@@ -226,6 +260,76 @@ export default function AdminScreen() {
     setImageModal(url);
   };
 
+  // ── Acciones de recarga ──────────────────────────────────────────────
+  const handleApproveRecharge = (req: RechargeRequest) => {
+    Alert.alert(
+      "Aprobar recarga",
+      `¿Confirmas aprobar la recarga de $${Number(req.amount).toLocaleString("es-CO")} COP para ${req.user_name}?\n\nEsto sumará el saldo inmediatamente a su cuenta.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "✅ Aprobar",
+          onPress: async () => {
+            setActing(true);
+            try {
+              await api.post(
+                `/payments/admin/recharge-requests/${req.id}/approve`,
+              );
+              Alert.alert(
+                "✅ Recarga aprobada",
+                "El saldo fue actualizado correctamente.",
+              );
+              loadRecharges();
+            } catch (err: any) {
+              Alert.alert(
+                "Error",
+                err?.response?.data?.error || "No se pudo aprobar",
+              );
+            } finally {
+              setActing(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRejectRecharge = async () => {
+    if (!selectedRecharge || !rechargeRejectReason.trim()) {
+      Alert.alert("Error", "Debes indicar el motivo del rechazo");
+      return;
+    }
+    setActing(true);
+    try {
+      await api.post(
+        `/payments/admin/recharge-requests/${selectedRecharge.id}/reject`,
+        {
+          reason: rechargeRejectReason,
+        },
+      );
+      Alert.alert("❌ Rechazada", "La solicitud de recarga fue rechazada.");
+      setRechargeRejectModal(false);
+      setSelectedRecharge(null);
+      setRechargeRejectReason("");
+      loadRecharges();
+    } catch (err: any) {
+      Alert.alert("Error", err?.response?.data?.error || "No se pudo rechazar");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const RECHARGE_STATUS_LABEL: Record<string, string> = {
+    pending: "⏳ Pendiente",
+    approved: "✅ Aprobada",
+    rejected: "❌ Rechazada",
+  };
+  const RECHARGE_STATUS_COLOR: Record<string, string> = {
+    pending: "#D4AF37",
+    approved: "#4caf50",
+    rejected: "#dd0000",
+  };
+
   const handleLogout = async () => {
     Alert.alert("Cerrar sesión", "¿Confirmas que deseas salir?", [
       { text: "Cancelar", style: "cancel" },
@@ -256,6 +360,10 @@ export default function AdminScreen() {
       </View>
     );
   }
+
+  const pendingRechargesCount = recharges.filter(
+    (r) => r.status === "pending",
+  ).length;
 
   return (
     <ScrollView
@@ -295,7 +403,7 @@ export default function AdminScreen() {
 
       {/* Tabs */}
       <View style={{ flexDirection: "row", gap: 8 }}>
-        {(["registros", "comisiones"] as Tab[]).map((t) => (
+        {(["registros", "comisiones", "recargas"] as Tab[]).map((t) => (
           <TouchableOpacity
             key={t}
             onPress={() => setTab(t)}
@@ -313,11 +421,14 @@ export default function AdminScreen() {
               style={{
                 color: tab === t ? "#000" : palette.text,
                 fontWeight: "700",
+                fontSize: 13,
               }}
             >
               {t === "registros"
                 ? `Registros${professionals.length > 0 ? ` (${professionals.length})` : ""}`
-                : "Comisiones"}
+                : t === "comisiones"
+                  ? "Comisiones"
+                  : `Recargas${pendingRechargesCount > 0 ? ` (${pendingRechargesCount})` : ""}`}
             </Text>
           </TouchableOpacity>
         ))}
@@ -351,7 +462,6 @@ export default function AdminScreen() {
                   borderColor: "#D4AF37",
                 }}
               >
-                {/* Foto y datos */}
                 <View
                   style={{
                     flexDirection: "row",
@@ -418,7 +528,6 @@ export default function AdminScreen() {
                   </View>
                 </View>
 
-                {/* Info */}
                 <View style={{ gap: 3, marginBottom: 12 }}>
                   {prof.phone && (
                     <Text style={{ color: "#aaa", fontSize: 13 }}>
@@ -435,7 +544,6 @@ export default function AdminScreen() {
                   </Text>
                 </View>
 
-                {/* Documentos */}
                 <Text
                   style={{
                     color: palette.primary,
@@ -483,7 +591,6 @@ export default function AdminScreen() {
                   ))}
                 </View>
 
-                {/* Acciones */}
                 <View style={{ flexDirection: "row", gap: 10 }}>
                   <TouchableOpacity
                     onPress={() => handleApprove(prof)}
@@ -530,7 +637,6 @@ export default function AdminScreen() {
       {/* ══ TAB COMISIONES ════════════════════════════════════════════ */}
       {tab === "comisiones" && (
         <>
-          {/* Saldo total */}
           {totals && (
             <View
               style={{
@@ -565,7 +671,6 @@ export default function AdminScreen() {
             </View>
           )}
 
-          {/* Filtro fechas */}
           <View
             style={{
               backgroundColor: palette.card,
@@ -647,7 +752,6 @@ export default function AdminScreen() {
             </View>
           </View>
 
-          {/* Totales período */}
           {filteredTotals && (
             <View
               style={{
@@ -712,7 +816,6 @@ export default function AdminScreen() {
             </View>
           )}
 
-          {/* Por profesional */}
           {commError && (
             <View
               style={{
@@ -762,7 +865,6 @@ export default function AdminScreen() {
             </>
           )}
 
-          {/* Histórico detallado */}
           <TouchableOpacity
             onPress={() => setShowHistory(!showHistory)}
             style={{
@@ -853,6 +955,212 @@ export default function AdminScreen() {
         </>
       )}
 
+      {/* ══ TAB RECARGAS ══════════════════════════════════════════════ */}
+      {tab === "recargas" && (
+        <>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {(["pending", "all"] as const).map((f) => (
+              <TouchableOpacity
+                key={f}
+                onPress={() => setRechargeFilter(f)}
+                style={{
+                  flex: 1,
+                  padding: 10,
+                  borderRadius: 8,
+                  alignItems: "center",
+                  backgroundColor:
+                    rechargeFilter === f ? palette.primary : "transparent",
+                  borderWidth: 1,
+                  borderColor: rechargeFilter === f ? palette.primary : "#555",
+                }}
+              >
+                <Text
+                  style={{
+                    color: rechargeFilter === f ? "#000" : palette.text,
+                    fontWeight: "700",
+                    fontSize: 13,
+                  }}
+                >
+                  {f === "pending" ? "Pendientes" : "Todas"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {recharges.length === 0 ? (
+            <View
+              style={{
+                backgroundColor: palette.card,
+                padding: 24,
+                borderRadius: 12,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#888", fontSize: 16 }}>
+                {rechargeFilter === "pending"
+                  ? "✅ No hay recargas pendientes"
+                  : "Sin solicitudes de recarga"}
+              </Text>
+            </View>
+          ) : (
+            recharges.map((req) => (
+              <View
+                key={req.id}
+                style={{
+                  backgroundColor: palette.card,
+                  borderRadius: 12,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: RECHARGE_STATUS_COLOR[req.status],
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    marginBottom: 10,
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: palette.text,
+                        fontWeight: "700",
+                        fontSize: 16,
+                      }}
+                    >
+                      {req.user_name || "Profesional"}
+                    </Text>
+                    <Text style={{ color: "#D4AF37", fontSize: 12 }}>
+                      {ROLE_LABELS[req.user_role || ""] || req.user_role}
+                    </Text>
+                    {req.user_phone && (
+                      <Text style={{ color: "#888", fontSize: 12 }}>
+                        📞 {req.user_phone}
+                      </Text>
+                    )}
+                  </View>
+                  <View
+                    style={{
+                      backgroundColor: RECHARGE_STATUS_COLOR[req.status] + "22",
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: RECHARGE_STATUS_COLOR[req.status],
+                        fontWeight: "700",
+                        fontSize: 12,
+                      }}
+                    >
+                      {RECHARGE_STATUS_LABEL[req.status]}
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={{
+                    backgroundColor: "#0a2a0a",
+                    borderRadius: 10,
+                    padding: 12,
+                    borderWidth: 1,
+                    borderColor: "#4caf50",
+                    marginBottom: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#22C55E",
+                      fontWeight: "900",
+                      fontSize: 26,
+                    }}
+                  >
+                    ${Number(req.amount).toLocaleString("es-CO")}
+                    <Text style={{ fontSize: 13, fontWeight: "400" }}>
+                      {" "}
+                      COP
+                    </Text>
+                  </Text>
+                </View>
+
+                {req.notes && (
+                  <Text
+                    style={{ color: "#aaa", fontSize: 12, marginBottom: 8 }}
+                  >
+                    📝 {req.notes}
+                  </Text>
+                )}
+
+                <Text style={{ color: "#666", fontSize: 11, marginBottom: 10 }}>
+                  Solicitado: {fmtDate(req.created_at)}
+                </Text>
+
+                <TouchableOpacity
+                  onPress={() => setImageModal(req.receipt)}
+                  style={{
+                    backgroundColor: "#0d1b2e",
+                    borderWidth: 1,
+                    borderColor: palette.primary,
+                    borderRadius: 8,
+                    padding: 10,
+                    alignItems: "center",
+                    marginBottom: 12,
+                  }}
+                >
+                  <Text style={{ color: palette.primary, fontSize: 13 }}>
+                    📎 Ver comprobante de pago →
+                  </Text>
+                </TouchableOpacity>
+
+                {req.status === "pending" && (
+                  <View style={{ flexDirection: "row", gap: 10 }}>
+                    <TouchableOpacity
+                      onPress={() => handleApproveRecharge(req)}
+                      disabled={acting}
+                      style={{
+                        flex: 1,
+                        backgroundColor: "#0A7E07",
+                        padding: 12,
+                        borderRadius: 10,
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "900" }}>
+                        ✅ Aprobar
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSelectedRecharge(req);
+                        setRechargeRejectModal(true);
+                      }}
+                      disabled={acting}
+                      style={{
+                        flex: 1,
+                        backgroundColor: "#2a0a0a",
+                        borderWidth: 1,
+                        borderColor: "#dd0000",
+                        padding: 12,
+                        borderRadius: 10,
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ color: "#dd0000", fontWeight: "900" }}>
+                        ❌ Rechazar
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            ))
+          )}
+        </>
+      )}
+
       {/* Gestionar Tienda */}
       <TouchableOpacity
         onPress={() => router.push("/admin-store" as any)}
@@ -889,7 +1197,7 @@ export default function AdminScreen() {
         <Text style={{ color: "#aaa" }}>← Volver al perfil</Text>
       </TouchableOpacity>
 
-      {/* Modal rechazar */}
+      {/* Modal rechazar registro */}
       <Modal visible={rejectModal} transparent animationType="slide">
         <View
           style={{
@@ -961,7 +1269,79 @@ export default function AdminScreen() {
         </View>
       </Modal>
 
-      {/* Modal imagen documento */}
+      {/* Modal rechazar recarga */}
+      <Modal visible={rechargeRejectModal} transparent animationType="slide">
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "#00000099",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#1a1a1a",
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: 28,
+              gap: 16,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 18 }}>
+              Rechazar recarga: {selectedRecharge?.user_name}
+            </Text>
+            <Text style={{ color: "#888", fontSize: 12 }}>
+              Ejemplos: "Comprobante ilegible", "Monto no coincide",
+              "Transferencia no encontrada"
+            </Text>
+            <TextInput
+              placeholder="Escribe el motivo del rechazo..."
+              placeholderTextColor="#555"
+              multiline
+              numberOfLines={4}
+              value={rechargeRejectReason}
+              onChangeText={setRechargeRejectReason}
+              style={{
+                backgroundColor: "#0d0d0d",
+                borderWidth: 1,
+                borderColor: "#dd0000",
+                borderRadius: 10,
+                padding: 14,
+                color: "#fff",
+                fontSize: 14,
+                textAlignVertical: "top",
+                minHeight: 100,
+              }}
+            />
+            <TouchableOpacity
+              onPress={handleRejectRecharge}
+              disabled={acting || !rechargeRejectReason.trim()}
+              style={{
+                backgroundColor:
+                  acting || !rechargeRejectReason.trim() ? "#333" : "#dd0000",
+                padding: 16,
+                borderRadius: 10,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "900" }}>
+                {acting ? "Rechazando..." : "Confirmar rechazo"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setRechargeRejectModal(false);
+                setRechargeRejectReason("");
+              }}
+              style={{ padding: 12, alignItems: "center" }}
+            >
+              <Text style={{ color: "#666" }}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal imagen documento / comprobante */}
       <Modal visible={!!imageModal} transparent animationType="fade">
         <TouchableOpacity
           style={{
