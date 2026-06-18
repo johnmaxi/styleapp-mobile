@@ -9,7 +9,6 @@ import {
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import * as WebBrowser from "expo-web-browser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -33,13 +32,9 @@ const proTypeOptions: ProfessionalType[] = [
 ];
 
 const PAYMENT_OPTIONS = [
-  { id: "efectivo", label: "💵  Efectivo", group: "directo" },
-  { id: "nequi", label: "📱  Nequi", group: "directo" },
-  { id: "pse", label: "🏦  PSE — pago por MercadoPago", group: "mp" },
-  { id: "tarjeta", label: "💳  Tarjeta — pago por MercadoPago", group: "mp" },
+  { id: "efectivo", label: "💵  Efectivo" },
+  { id: "nequi", label: "📱  Nequi / Bancolombia / Llaves" },
 ];
-
-const MP_METHODS = ["pse", "tarjeta"];
 
 export default function CreateService() {
   const router = useRouter();
@@ -47,7 +42,6 @@ export default function CreateService() {
   const { t } = useTranslation();
   const palette = getPalette(user?.gender);
 
-  // ── Leer params del flujo anterior ───────────────────────────────────
   const params = useLocalSearchParams<{
     proType?: string;
     mode?: string;
@@ -75,9 +69,6 @@ export default function CreateService() {
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("");
   const [geocoding, setGeocoding] = useState(false);
-  const [mpReference, setMpReference] = useState<string | null>(null);
-  const [mpPaid, setMpPaid] = useState(false);
-  const [payingMP, setPayingMP] = useState(false);
 
   const isScheduled = params.mode === "scheduled";
   const scheduledAt = params.scheduled_at || null;
@@ -107,13 +98,6 @@ export default function CreateService() {
     }
     return total;
   }, [selectedServices, selectedSubOption, currentServices, proType]);
-
-  const isMPMethod = MP_METHODS.includes(paymentMethod);
-
-  useEffect(() => {
-    setMpPaid(false);
-    setMpReference(null);
-  }, [paymentMethod, price]);
 
   const geocodeAddress = async (text: string) => {
     if (!text || text.trim().length < 8) return;
@@ -237,101 +221,6 @@ export default function CreateService() {
       })
       .join(", ");
 
-  const handleMPPayment = async () => {
-    if (!price || Number(price) <= 0) {
-      Alert.alert("Error", "Ingresa el precio del servicio antes de pagar");
-      return;
-    }
-    setPayingMP(true);
-    try {
-      const amountInCents = Number(price) * 100;
-      const res = await api.post("/payments/service-checkout", {
-        amount_in_cents: amountInCents,
-        payment_method: paymentMethod,
-        service_type: buildServiceType(),
-      });
-      const { checkout_url, reference } = res.data;
-      if (!checkout_url) {
-        Alert.alert("Error", "No se pudo generar el link de pago");
-        return;
-      }
-      setMpReference(reference);
-      await WebBrowser.openBrowserAsync(checkout_url, {
-        dismissButtonStyle: "close",
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-      });
-      setPayingMP(true);
-      let paid = false;
-      for (let i = 0; i < 6; i++) {
-        try {
-          await new Promise((r) => setTimeout(r, 2000));
-          const checkRes = await api.get(
-            `/payments/verify-service-payment/${reference}`,
-          );
-          if (checkRes.data.paid) {
-            paid = true;
-            break;
-          }
-        } catch {}
-      }
-      setPayingMP(false);
-      if (paid) {
-        setMpPaid(true);
-      } else {
-        Alert.alert(
-          "¿Completaste el pago?",
-          "Si pagaste en MercadoPago toca Verificar. Si no, cambia el método de pago.",
-          [
-            {
-              text: "✅ Verificar pago",
-              onPress: async () => {
-                setPayingMP(true);
-                let verifiedPaid = false;
-                for (let i = 0; i < 4; i++) {
-                  try {
-                    await new Promise((r) => setTimeout(r, 2000));
-                    const checkRes = await api.get(
-                      `/payments/verify-service-payment/${reference}`,
-                    );
-                    if (checkRes.data.paid) {
-                      verifiedPaid = true;
-                      break;
-                    }
-                  } catch {}
-                }
-                setPayingMP(false);
-                if (verifiedPaid) {
-                  setMpPaid(true);
-                } else {
-                  Alert.alert(
-                    "Sin confirmar",
-                    "El pago no fue encontrado. Intenta con otro método.",
-                  );
-                  setMpReference(null);
-                }
-              },
-            },
-            {
-              text: "Cambiar método",
-              style: "cancel",
-              onPress: () => {
-                setMpReference(null);
-                setPaymentMethod("");
-              },
-            },
-          ],
-        );
-      }
-    } catch (err: any) {
-      Alert.alert(
-        "Error",
-        err?.response?.data?.error || "No se pudo iniciar el pago",
-      );
-    } finally {
-      setPayingMP(false);
-    }
-  };
-
   const doCreate = async () => {
     setLoading(true);
     try {
@@ -373,7 +262,6 @@ export default function CreateService() {
         latitude: lat,
         longitude: lng,
         payment_method: paymentMethod,
-        mp_reference: mpReference || undefined,
         scheduled_at: scheduledAt || undefined,
         scheduling_notes: params.notes || undefined,
       });
@@ -444,17 +332,6 @@ export default function CreateService() {
       Alert.alert("Error", "Selecciona un medio de pago");
       return;
     }
-    if (isMPMethod && !mpPaid) {
-      Alert.alert(
-        "Pago requerido",
-        `Para pagar con ${paymentMethod === "pse" ? "PSE" : "Tarjeta"} debes completar el pago por MercadoPago antes de publicar.`,
-        [
-          { text: "Pagar ahora", onPress: handleMPPayment },
-          { text: t("common.cancel"), style: "cancel" },
-        ],
-      );
-      return;
-    }
     if (minPrice > 0 && Number(price) < minPrice) {
       setShowPriceModal(true);
       return;
@@ -486,7 +363,6 @@ export default function CreateService() {
           : t("client.createService.title")}
       </Text>
 
-      {/* ── BADGE AGENDAMIENTO ── */}
       {isScheduled && scheduledAt && (
         <View
           style={{
@@ -514,7 +390,6 @@ export default function CreateService() {
         </View>
       )}
 
-      {/* ── TIPO PROFESIONAL ── */}
       {!params.proType && (
         <>
           <Text
@@ -562,7 +437,6 @@ export default function CreateService() {
         </>
       )}
 
-      {/* ── SERVICIOS ── */}
       {proType && (
         <>
           <Text
@@ -702,7 +576,6 @@ export default function CreateService() {
         </>
       )}
 
-      {/* ── DIRECCIÓN ── */}
       <Text style={{ color: palette.text, fontWeight: "700", marginTop: 4 }}>
         Direccion del servicio
       </Text>
@@ -817,7 +690,6 @@ export default function CreateService() {
         </Text>
       </TouchableOpacity>
 
-      {/* ── PRECIO ── */}
       <Text style={{ color: palette.text, fontWeight: "700" }}>
         Tu oferta de precio
       </Text>
@@ -851,12 +723,10 @@ export default function CreateService() {
           value={price ? Number(price).toLocaleString("es-CO") : ""}
           onChangeText={(txt) => setPrice(txt.replace(/\D/g, ""))}
           style={{ flex: 1, paddingVertical: 12, color: palette.text }}
-          editable={!isMPMethod || !mpPaid}
         />
         <Text style={{ color: "#888", fontSize: 11 }}>COP</Text>
       </View>
 
-      {/* ── MEDIO DE PAGO ── */}
       <Text style={{ color: palette.text, fontWeight: "700", marginBottom: 6 }}>
         Medio de pago
       </Text>
@@ -871,10 +741,9 @@ export default function CreateService() {
         }}
       >
         <Text style={{ color: "#888", fontSize: 11 }}>
-          💵 <Text style={{ color: "#ccc" }}>Efectivo / Nequi</Text> — el
-          profesional confirma el pago al finalizar.{"\n"}
-          💳 <Text style={{ color: "#ccc" }}>PSE / Tarjeta</Text> — debes pagar
-          por MercadoPago antes de publicar. Precio fijo.
+          💵 <Text style={{ color: "#ccc" }}>Efectivo</Text> o 📱{" "}
+          <Text style={{ color: "#ccc" }}>Nequi/Bancolombia/Llaves</Text> — el
+          profesional confirma el pago al finalizar el servicio.
         </Text>
       </View>
       <View style={{ gap: 8, marginBottom: 10 }}>
@@ -908,109 +777,26 @@ export default function CreateService() {
               }}
             />
             <Text style={{ color: palette.text, flex: 1 }}>{opt.label}</Text>
-            {opt.group === "mp" && (
-              <Text style={{ color: "#555", fontSize: 10 }}>Precio fijo</Text>
-            )}
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* ── PAGO MP ── */}
-      {isMPMethod && (
-        <View
-          style={{
-            backgroundColor: "#0d2137",
-            borderRadius: 12,
-            padding: 16,
-            borderWidth: 2,
-            borderColor: mpPaid ? "#22C55E" : "#009EE3",
-            marginBottom: 8,
-            gap: 10,
-          }}
-        >
-          {mpPaid ? (
-            <>
-              <Text
-                style={{ color: "#22C55E", fontWeight: "900", fontSize: 16 }}
-              >
-                ✅ Pago confirmado
-              </Text>
-              <Text style={{ color: "#86EFAC", fontSize: 13 }}>
-                Se reservaron ${Number(price).toLocaleString("es-CO")} COP.
-                Puedes publicar.
-              </Text>
-              <Text style={{ color: "#555", fontSize: 11 }}>
-                Ref: {mpReference}
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text
-                style={{ color: "#009EE3", fontWeight: "700", fontSize: 15 }}
-              >
-                Pago requerido — {paymentMethod === "pse" ? "PSE" : "Tarjeta"}
-              </Text>
-              <Text style={{ color: "#888", fontSize: 12 }}>
-                El monto queda retenido hasta que el profesional finalice. Sin
-                contraofertas.
-              </Text>
-              {price && Number(price) > 0 && (
-                <Text
-                  style={{ color: "#fff", fontWeight: "700", fontSize: 18 }}
-                >
-                  Total: ${Number(price).toLocaleString("es-CO")} COP
-                </Text>
-              )}
-              <TouchableOpacity
-                onPress={handleMPPayment}
-                disabled={payingMP || !price || Number(price) <= 0}
-                style={{
-                  backgroundColor:
-                    price && Number(price) > 0 ? "#009EE3" : "#333",
-                  padding: 14,
-                  borderRadius: 10,
-                  alignItems: "center",
-                  opacity: payingMP ? 0.7 : 1,
-                }}
-              >
-                <Text
-                  style={{ color: "#fff", fontWeight: "900", fontSize: 15 }}
-                >
-                  {payingMP
-                    ? "Abriendo MercadoPago..."
-                    : `Pagar $${price ? Number(price).toLocaleString("es-CO") : "0"} con MercadoPago`}
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      )}
-
-      {/* ── PUBLICAR ── */}
       <TouchableOpacity
         onPress={handleCreate}
-        disabled={loading || (isMPMethod && !mpPaid)}
+        disabled={loading}
         style={{
-          backgroundColor: isMPMethod && !mpPaid ? "#333" : palette.primary,
+          backgroundColor: palette.primary,
           paddingVertical: 14,
           alignItems: "center",
           borderRadius: 10,
         }}
       >
-        <Text
-          style={{
-            color: isMPMethod && !mpPaid ? "#666" : "#000",
-            fontWeight: "700",
-            fontSize: 16,
-          }}
-        >
+        <Text style={{ color: "#000", fontWeight: "700", fontSize: 16 }}>
           {loading
             ? t("common.loading")
-            : isMPMethod && !mpPaid
-              ? "Completa el pago primero"
-              : isScheduled
-                ? t("client.createService.confirmBooking")
-                : t("client.createService.publish")}
+            : isScheduled
+              ? t("client.createService.confirmBooking")
+              : t("client.createService.publish")}
         </Text>
       </TouchableOpacity>
 
@@ -1028,7 +814,6 @@ export default function CreateService() {
         <Text style={{ color: "#aaa" }}>Cancelar</Text>
       </TouchableOpacity>
 
-      {/* ── MODAL PRECIO BAJO ── */}
       <Modal visible={showPriceModal} transparent animationType="fade">
         <View
           style={{

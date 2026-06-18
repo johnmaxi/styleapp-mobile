@@ -96,6 +96,21 @@ export default function Jobs() {
     lat: number;
     lng: number;
   } | null>(null);
+  const [balance, setBalance] = useState<number>(0);
+  const MIN_BALANCE_TO_ACCEPT = 0;
+
+  useEffect(() => {
+    const loadBalance = async () => {
+      try {
+        const res = await api.get("/payments/balance");
+        if (res?.data?.balance !== undefined)
+          setBalance(Number(res.data.balance));
+      } catch {}
+    };
+    loadBalance();
+    const balTimer = setInterval(loadBalance, 10000);
+    return () => clearInterval(balTimer);
+  }, []);
 
   const notifiedRejected = useRef<Set<number>>(new Set());
   const notifiedAccepted = useRef<Set<number>>(new Set());
@@ -264,6 +279,20 @@ export default function Jobs() {
   }, [loadOpenRequests]);
 
   const handleAccept = async (item: RequestItem) => {
+    if (balance < MIN_BALANCE_TO_ACCEPT) {
+      Alert.alert(
+        "⚠️ Saldo negativo",
+        `Tu saldo es negativo: $${balance.toLocaleString("es-CO")} COP.\n\nDebes recargar tu saldo antes de poder aceptar nuevos servicios.`,
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Recargar saldo",
+            onPress: () => router.push("/recharge" as any),
+          },
+        ],
+      );
+      return;
+    }
     try {
       setActionLoadingId(item.id);
       const res = await api.post("/bids/accept-direct", {
@@ -408,8 +437,41 @@ Recibirás una notificación 1 hora antes.`,
       }}
     >
       <Text style={{ fontSize: 22, fontWeight: "900", color: palette.text }}>
-        t("professional.jobs.title")
+        {t("professional.jobs.title")}
       </Text>
+
+      {/* Banner de saldo negativo */}
+      {balance < MIN_BALANCE_TO_ACCEPT && (
+        <TouchableOpacity
+          onPress={() => router.push("/recharge" as any)}
+          style={{
+            backgroundColor: "#450A0A",
+            borderWidth: 2,
+            borderColor: "#B91C1C",
+            borderRadius: 12,
+            padding: 14,
+            gap: 4,
+          }}
+        >
+          <Text style={{ color: "#EF4444", fontWeight: "900", fontSize: 14 }}>
+            ⚠️ Saldo negativo
+          </Text>
+          <Text style={{ color: "#F87171", fontSize: 12 }}>
+            Tu saldo: ${balance.toLocaleString("es-CO")} COP. Recarga tu saldo
+            para poder aceptar servicios.
+          </Text>
+          <Text
+            style={{
+              color: "#EF4444",
+              fontSize: 12,
+              fontWeight: "700",
+              marginTop: 2,
+            }}
+          >
+            Toca para recargar →
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {requests.length === 0 ? (
         <View

@@ -1,11 +1,12 @@
 // app/recharge.tsx
 import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import {
   Alert,
+  Image,
   ScrollView,
   Text,
   TextInput,
@@ -15,10 +16,57 @@ import {
 import api from "../api";
 
 const AMOUNTS = [10000, 20000, 50000, 100000, 200000];
+const NEQUI_INFO = {
+  numero: "3042415204",
+  titular: "John Arenas",
+  redes: "Nequi · Bancolombia · Daviplata · Llaves",
+};
 
-// Detectar si estamos en modo pruebas (ACCESS TOKEN empieza con TEST-)
-// El backend decide qué URL usar (init_point vs sandbox_init_point)
-const IS_SANDBOX = true; // cambiar a true para pruebas locales
+const MAX_B64 = 800 * 1024;
+
+async function pickReceiptImage(): Promise<string | null> {
+  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!perm.granted) {
+    Alert.alert(
+      "Permiso requerido",
+      "Activa el acceso a la galería en Configuración",
+    );
+    return null;
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    allowsEditing: true,
+    quality: 0.5,
+    base64: true,
+  });
+  if (result.canceled || !result.assets?.[0]?.base64) return null;
+  const b64 = result.assets[0].base64!;
+  if (b64.length > MAX_B64) {
+    Alert.alert("Imagen muy grande", "Máximo 600KB. Reduce la resolución.");
+    return null;
+  }
+  return `data:image/jpeg;base64,${b64}`;
+}
+
+async function takeReceiptPhoto(): Promise<string | null> {
+  const perm = await ImagePicker.requestCameraPermissionsAsync();
+  if (!perm.granted) {
+    Alert.alert("Permiso requerido", "Activa la cámara en Configuración");
+    return null;
+  }
+  const result = await ImagePicker.launchCameraAsync({
+    allowsEditing: true,
+    quality: 0.5,
+    base64: true,
+  });
+  if (result.canceled || !result.assets?.[0]?.base64) return null;
+  const b64 = result.assets[0].base64!;
+  if (b64.length > MAX_B64) {
+    Alert.alert("Imagen muy grande", "Máximo 600KB.");
+    return null;
+  }
+  return `data:image/jpeg;base64,${b64}`;
+}
 
 export default function RechargeScreen() {
   const router = useRouter();
@@ -26,63 +74,66 @@ export default function RechargeScreen() {
   const palette = getPalette(user?.gender);
 
   const [amount, setAmount] = useState("");
-  const [loading, setLoading] = useState(false);
   const [customAmount, setCustomAmount] = useState(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<"info" | "upload">("info");
 
-  const selectedAmount = Number(amount.replace(/\D/g, "")) || 0;
+  const selectedAmount = Number(amount.replace(/\D/g, ""));
 
-  const handleRecharge = async () => {
-    if (selectedAmount < 1000) {
-      Alert.alert("Monto minimo", "El monto minimo de recarga es $1.000 COP");
+  const handlePickReceipt = () => {
+    Alert.alert(
+      "Adjuntar comprobante",
+      "¿Cómo quieres agregar el comprobante?",
+      [
+        {
+          text: "📷 Tomar foto",
+          onPress: async () => {
+            const img = await takeReceiptPhoto();
+            if (img) setReceipt(img);
+          },
+        },
+        {
+          text: "🖼️ Desde galería",
+          onPress: async () => {
+            const img = await pickReceiptImage();
+            if (img) setReceipt(img);
+          },
+        },
+        { text: "Cancelar", style: "cancel" },
+      ],
+    );
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedAmount || selectedAmount < 5000) {
+      Alert.alert("Monto inválido", "El monto mínimo de recarga es $5.000 COP");
       return;
     }
-    if (selectedAmount > 5000000) {
+    if (!receipt) {
       Alert.alert(
-        "Monto maximo",
-        "El monto maximo de recarga es $5.000.000 COP",
+        "Comprobante requerido",
+        "Debes adjuntar el comprobante de pago",
       );
       return;
     }
-
     setLoading(true);
     try {
-      const amountInCents = selectedAmount * 100;
-
-      const res = await api.post("/payments/mp-preference", {
-        amount_in_cents: amountInCents,
+      await api.post("/payments/recharge-request", {
+        amount: selectedAmount,
+        receipt: receipt,
+        notes: notes.trim() || null,
       });
-
-      const { checkout_url, sandbox_url, reference } = res.data;
-
-      if (!checkout_url) {
-        Alert.alert("Error", "No se pudo obtener el link de pago");
-        return;
-      }
-
-      // En pruebas usar sandbox_url, en produccion usar checkout_url
-      const urlToOpen = IS_SANDBOX ? sandbox_url || checkout_url : checkout_url;
-
-      console.log("MP URL:", urlToOpen?.substring(0, 80) + "...");
-
-      const result = await WebBrowser.openBrowserAsync(urlToOpen, {
-        dismissButtonStyle: "close",
-        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-      });
-
-      if (result.type === "dismiss" || result.type === "cancel") {
-        Alert.alert(
-          "Recarga",
-          "Si completaste el pago, tu saldo se actualizara en unos segundos.",
-          [{ text: "Verificar", onPress: () => router.back() }],
-        );
-      }
+      Alert.alert(
+        "✅ Solicitud enviada",
+        `Tu solicitud de recarga por $${selectedAmount.toLocaleString("es-CO")} COP fue enviada.\n\nEl administrador aprobará tu saldo en las próximas horas.`,
+        [{ text: "Entendido", onPress: () => router.back() }],
+      );
     } catch (err: any) {
-      console.log("MP ERROR:", JSON.stringify(err?.response?.data));
       Alert.alert(
         "Error",
-        err?.response?.data?.error ||
-          err?.message ||
-          "No se pudo iniciar el pago",
+        err?.response?.data?.error || "No se pudo enviar la solicitud",
       );
     } finally {
       setLoading(false);
@@ -94,78 +145,150 @@ export default function RechargeScreen() {
       contentContainerStyle={{
         padding: 24,
         backgroundColor: palette.background,
-        gap: 14,
-        paddingBottom: 48,
+        gap: 16,
+        paddingBottom: 40,
       }}
     >
-      <Text style={{ fontSize: 22, fontWeight: "700", color: palette.text }}>
-        Recargar saldo
+      <Text
+        style={{
+          fontSize: 24,
+          fontWeight: "900",
+          color: palette.primary,
+          marginBottom: 4,
+        }}
+      >
+        💰 Recargar saldo
       </Text>
-      <Text style={{ color: "#888", fontSize: 13 }}>
-        El saldo recargado se acredita a tu cuenta Style y se usa para pagar
-        servicios.
+      <Text style={{ color: "#888", fontSize: 13, lineHeight: 20 }}>
+        Recarga tu saldo para poder recibir servicios. La comisión del 15% se
+        descuenta automáticamente al finalizar cada servicio.
       </Text>
 
-      {/* MONTOS RAPIDOS */}
+      {/* ── PASO 1: INFO DE PAGO ── */}
+      <View
+        style={{
+          backgroundColor: "#0d1520",
+          borderRadius: 14,
+          padding: 18,
+          borderWidth: 2,
+          borderColor: palette.primary,
+          gap: 10,
+        }}
+      >
+        <Text
+          style={{ color: palette.primary, fontWeight: "900", fontSize: 16 }}
+        >
+          📱 Datos para transferencia
+        </Text>
+        <View style={{ gap: 6 }}>
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
+            <Text style={{ color: "#888", fontSize: 13 }}>Número:</Text>
+            <Text
+              style={{
+                color: palette.text,
+                fontWeight: "900",
+                fontSize: 18,
+                letterSpacing: 2,
+              }}
+            >
+              {NEQUI_INFO.numero}
+            </Text>
+          </View>
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
+            <Text style={{ color: "#888", fontSize: 13 }}>Titular:</Text>
+            <Text style={{ color: palette.text, fontWeight: "700" }}>
+              {NEQUI_INFO.titular}
+            </Text>
+          </View>
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 4,
+            }}
+          >
+            <Text style={{ color: "#888", fontSize: 13 }}>Redes:</Text>
+            <Text style={{ color: "#4caf50", fontWeight: "700", fontSize: 13 }}>
+              {NEQUI_INFO.redes}
+            </Text>
+          </View>
+        </View>
+        <View
+          style={{
+            backgroundColor: "#162030",
+            borderRadius: 8,
+            padding: 10,
+            marginTop: 4,
+          }}
+        >
+          <Text
+            style={{
+              color: "#D4AF37",
+              fontSize: 12,
+              textAlign: "center",
+              lineHeight: 18,
+            }}
+          >
+            ⚠️ Realiza la transferencia primero, luego adjunta el comprobante
+            aquí para que el administrador apruebe tu recarga.
+          </Text>
+        </View>
+      </View>
+
+      {/* ── SELECCIONAR MONTO ── */}
       <Text style={{ color: palette.primary, fontWeight: "700" }}>
-        Selecciona un monto
+        1. Selecciona el monto a recargar
       </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-        {AMOUNTS.map((a) => (
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {AMOUNTS.map((amt) => (
           <TouchableOpacity
-            key={a}
+            key={amt}
             onPress={() => {
-              setAmount(String(a));
+              setAmount(String(amt));
               setCustomAmount(false);
             }}
             style={{
-              borderWidth: 1,
-              borderColor:
-                selectedAmount === a && !customAmount
-                  ? palette.primary
-                  : "#444",
-              borderRadius: 10,
-              paddingVertical: 12,
+              paddingVertical: 10,
               paddingHorizontal: 16,
+              borderRadius: 10,
+              borderWidth: 1.5,
+              borderColor: selectedAmount === amt ? palette.primary : "#333",
               backgroundColor:
-                selectedAmount === a && !customAmount
-                  ? palette.primary + "22"
-                  : "transparent",
+                selectedAmount === amt ? palette.primary + "22" : "#141414",
             }}
           >
             <Text
               style={{
-                color:
-                  selectedAmount === a && !customAmount
-                    ? palette.primary
-                    : "#ccc",
+                color: selectedAmount === amt ? palette.primary : "#888",
                 fontWeight: "700",
               }}
             >
-              ${a.toLocaleString("es-CO")}
+              ${amt.toLocaleString("es-CO")}
             </Text>
           </TouchableOpacity>
         ))}
-
         <TouchableOpacity
           onPress={() => {
             setCustomAmount(true);
             setAmount("");
           }}
           style={{
-            borderWidth: 1,
-            borderColor: customAmount ? palette.primary : "#444",
-            borderRadius: 10,
-            paddingVertical: 12,
+            paddingVertical: 10,
             paddingHorizontal: 16,
-            backgroundColor: customAmount
-              ? palette.primary + "22"
-              : "transparent",
+            borderRadius: 10,
+            borderWidth: 1.5,
+            borderColor: customAmount ? palette.primary : "#333",
+            backgroundColor: customAmount ? palette.primary + "22" : "#141414",
           }}
         >
           <Text
             style={{
-              color: customAmount ? palette.primary : "#ccc",
+              color: customAmount ? palette.primary : "#888",
               fontWeight: "700",
             }}
           >
@@ -174,128 +297,169 @@ export default function RechargeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* INPUT PERSONALIZADO */}
       {customAmount && (
-        <View>
-          <Text style={{ color: "#aaa", marginBottom: 6, fontSize: 12 }}>
-            Ingresa el monto (minimo $1.000 — maximo $5.000.000)
-          </Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              borderWidth: 1,
-              borderColor: palette.primary,
-              borderRadius: 8,
-              paddingHorizontal: 12,
-            }}
-          >
-            <Text
-              style={{
-                color: palette.primary,
-                fontWeight: "700",
-                marginRight: 4,
-              }}
-            >
-              $
-            </Text>
-            <TextInput
-              placeholder="0"
-              placeholderTextColor="#555"
-              keyboardType="numeric"
-              value={
-                selectedAmount > 0 ? selectedAmount.toLocaleString("es-CO") : ""
-              }
-              onChangeText={(t) => setAmount(t.replace(/\D/g, ""))}
-              style={{
-                flex: 1,
-                paddingVertical: 12,
-                color: palette.text,
-                fontSize: 18,
-              }}
-            />
-            <Text style={{ color: "#888" }}>COP</Text>
-          </View>
-        </View>
-      )}
-
-      {/* RESUMEN */}
-      {selectedAmount >= 1000 && (
         <View
           style={{
-            backgroundColor: palette.card,
-            padding: 16,
-            borderRadius: 10,
+            flexDirection: "row",
+            alignItems: "center",
             borderWidth: 1,
-            borderColor: palette.primary + "55",
+            borderColor: palette.primary,
+            borderRadius: 8,
+            paddingHorizontal: 12,
           }}
         >
-          <Text style={{ color: "#aaa", marginBottom: 4 }}>
-            Resumen de recarga
+          <Text
+            style={{
+              color: palette.primary,
+              fontWeight: "700",
+              fontSize: 16,
+              marginRight: 4,
+            }}
+          >
+            $
           </Text>
-          <Text style={{ color: palette.text, fontSize: 16 }}>
-            Monto:{" "}
-            <Text
-              style={{
-                color: palette.primary,
-                fontWeight: "700",
-                fontSize: 20,
-              }}
-            >
-              ${selectedAmount.toLocaleString("es-CO")} COP
-            </Text>
+          <TextInput
+            placeholder="Ingresa el monto"
+            placeholderTextColor="#555"
+            keyboardType="numeric"
+            value={amount ? Number(amount).toLocaleString("es-CO") : ""}
+            onChangeText={(txt) => setAmount(txt.replace(/\D/g, ""))}
+            style={{ flex: 1, paddingVertical: 12, color: palette.text }}
+          />
+          <Text style={{ color: "#888", fontSize: 11 }}>COP</Text>
+        </View>
+      )}
+
+      {selectedAmount > 0 && (
+        <View
+          style={{
+            backgroundColor: "#0a2a0a",
+            borderRadius: 10,
+            padding: 12,
+            borderWidth: 1,
+            borderColor: "#4caf50",
+          }}
+        >
+          <Text
+            style={{ color: "#4caf50", fontWeight: "700", textAlign: "center" }}
+          >
+            Transferir exactamente: ${selectedAmount.toLocaleString("es-CO")}{" "}
+            COP
           </Text>
-          <Text style={{ color: "#888", fontSize: 11, marginTop: 8 }}>
-            Metodos: Tarjeta de credito/debito, PSE, Nequi, Bancolombia
+          <Text
+            style={{
+              color: "#888",
+              fontSize: 11,
+              textAlign: "center",
+              marginTop: 4,
+            }}
+          >
+            al número {NEQUI_INFO.numero} — {NEQUI_INFO.titular}
           </Text>
         </View>
       )}
 
-      {/* LOGO MP */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-          paddingVertical: 4,
-        }}
-      >
-        <Text style={{ color: "#555", fontSize: 12 }}>Pagos seguros con</Text>
-        <Text style={{ color: "#009EE3", fontWeight: "900", fontSize: 14 }}>
-          Mercado Pago
-        </Text>
-      </View>
+      {/* ── COMPROBANTE ── */}
+      <Text style={{ color: palette.primary, fontWeight: "700" }}>
+        2. Adjunta el comprobante de pago
+      </Text>
 
-      {/* BOTON PAGAR */}
-      <TouchableOpacity
-        onPress={handleRecharge}
-        disabled={loading || selectedAmount < 1000}
+      {receipt ? (
+        <View style={{ gap: 8 }}>
+          <Image
+            source={{ uri: receipt }}
+            style={{
+              width: "100%",
+              height: 200,
+              borderRadius: 12,
+              resizeMode: "cover",
+            }}
+          />
+          <TouchableOpacity
+            onPress={handlePickReceipt}
+            style={{
+              borderWidth: 1,
+              borderColor: "#555",
+              padding: 10,
+              borderRadius: 8,
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ color: "#aaa", fontSize: 13 }}>
+              🔄 Cambiar comprobante
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          onPress={handlePickReceipt}
+          style={{
+            borderWidth: 2,
+            borderStyle: "dashed",
+            borderColor: palette.primary + "66",
+            borderRadius: 12,
+            padding: 32,
+            alignItems: "center",
+            backgroundColor: "#0d1520",
+            gap: 8,
+          }}
+        >
+          <Text style={{ fontSize: 40 }}>📎</Text>
+          <Text
+            style={{ color: palette.primary, fontWeight: "700", fontSize: 15 }}
+          >
+            Adjuntar comprobante
+          </Text>
+          <Text style={{ color: "#555", fontSize: 12, textAlign: "center" }}>
+            Foto o captura de pantalla del comprobante de transferencia
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* ── NOTAS OPCIONALES ── */}
+      <Text style={{ color: palette.primary, fontWeight: "700" }}>
+        3. Referencia o notas (opcional)
+      </Text>
+      <TextInput
+        value={notes}
+        onChangeText={setNotes}
+        placeholder="Ej: Transferencia Nequi 10am..."
+        placeholderTextColor="#555"
+        multiline
+        numberOfLines={2}
         style={{
-          backgroundColor: selectedAmount >= 1000 ? "#009EE3" : "#333",
+          backgroundColor: "#141414",
+          borderWidth: 1,
+          borderColor: palette.primary + "44",
+          borderRadius: 8,
+          padding: 12,
+          color: palette.text,
+        }}
+      />
+
+      {/* ── ENVIAR ── */}
+      <TouchableOpacity
+        onPress={handleSubmit}
+        disabled={loading || !selectedAmount || !receipt}
+        style={{
+          backgroundColor:
+            !selectedAmount || !receipt ? "#222" : palette.primary,
           padding: 16,
-          borderRadius: 10,
+          borderRadius: 12,
           alignItems: "center",
           opacity: loading ? 0.7 : 1,
         }}
       >
         <Text
           style={{
-            color: selectedAmount >= 1000 ? "#fff" : "#666",
+            color: !selectedAmount || !receipt ? "#555" : "#000",
             fontWeight: "900",
             fontSize: 16,
           }}
         >
-          {loading ? "Abriendo pasarela..." : "Pagar con Mercado Pago"}
+          {loading ? "Enviando..." : "Enviar solicitud de recarga"}
         </Text>
       </TouchableOpacity>
-
-      {selectedAmount >= 1000 && (
-        <Text style={{ color: "#666", fontSize: 11, textAlign: "center" }}>
-          Seras redirigido a la pasarela segura de Mercado Pago. Tu saldo se
-          actualizara automaticamente al confirmar el pago.
-        </Text>
-      )}
 
       <TouchableOpacity
         onPress={() => router.back()}
@@ -307,7 +471,7 @@ export default function RechargeScreen() {
           alignItems: "center",
         }}
       >
-        <Text style={{ color: "#aaa" }}>Volver</Text>
+        <Text style={{ color: "#aaa" }}>Cancelar</Text>
       </TouchableOpacity>
     </ScrollView>
   );

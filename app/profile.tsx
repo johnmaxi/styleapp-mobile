@@ -112,12 +112,12 @@ export default function ProfileScreen() {
   const displayName =
     profileData?.name || user?.name || user?.email || "Usuario";
 
-  const balanceColor = balance >= 5000 ? "#22C55E" : "#EF4444";
-  const balanceBg = balance >= 5000 ? "#14532D" : "#450A0A";
-  const balanceBorder = balance >= 5000 ? "#16A34A" : "#B91C1C";
-  const balanceIcon = balance >= 5000 ? "💰" : "⚠️";
+  const balanceColor = balance >= 0 ? "#22C55E" : "#EF4444";
+  const balanceBg = balance >= 0 ? "#14532D" : "#450A0A";
+  const balanceBorder = balance >= 0 ? "#16A34A" : "#B91C1C";
+  const balanceIcon = balance >= 0 ? "💰" : "⚠️";
   const balanceLabel =
-    balance >= 5000 ? t("payments.available") : t("payments.balance");
+    balance >= 0 ? t("payments.available") : t("payments.balance");
 
   const ROLE_LABELS: Record<string, string> = {
     client: t("register.client"),
@@ -233,7 +233,7 @@ export default function ProfileScreen() {
           ${balance.toLocaleString("es-CO")}
           <Text style={{ fontSize: 16, fontWeight: "400" }}> COP</Text>
         </Text>
-        {balance < 5000 && (
+        {balance < 0 && (
           <Text
             style={{
               color: "#F87171",
