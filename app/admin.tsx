@@ -1,5 +1,6 @@
 // app/admin.tsx
 import api from "@/api";
+import { STORE_ENABLED } from "@/constants/featureFlags";
 import { useAuth } from "@/context/AuthContext";
 import { getPalette } from "@/utils/palette";
 import { useRouter } from "expo-router";
@@ -1161,23 +1162,25 @@ export default function AdminScreen() {
         </>
       )}
 
-      {/* Gestionar Tienda */}
-      <TouchableOpacity
-        onPress={() => router.push("/admin-store" as any)}
-        style={{
-          backgroundColor: "#1a0d2e",
-          padding: 14,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: "#9C27B0",
-          alignItems: "center",
-          marginTop: 4,
-        }}
-      >
-        <Text style={{ color: "#9C27B0", fontWeight: "700" }}>
-          🛍️ Gestionar Tienda
-        </Text>
-      </TouchableOpacity>
+      {/* Gestionar Tienda — deshabilitada para el MVP, reactivar en constants/featureFlags.ts */}
+      {STORE_ENABLED && (
+        <TouchableOpacity
+          onPress={() => router.push("/admin-store" as any)}
+          style={{
+            backgroundColor: "#1a0d2e",
+            padding: 14,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: "#9C27B0",
+            alignItems: "center",
+            marginTop: 4,
+          }}
+        >
+          <Text style={{ color: "#9C27B0", fontWeight: "700" }}>
+            🛍️ Gestionar Tienda
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {/* Volver */}
       <TouchableOpacity

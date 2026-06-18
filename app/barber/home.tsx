@@ -1,5 +1,6 @@
 // app/barber/home.tsx
 import api from "@/api";
+import { STORE_ENABLED } from "@/constants/featureFlags";
 import { useAuth } from "@/context/AuthContext";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { getPalette } from "@/utils/palette";
@@ -454,22 +455,24 @@ export default function BarberHome() {
         </Text>
       </TouchableOpacity>
 
-      {/* Tienda */}
-      <TouchableOpacity
-        onPress={() => router.push("/store" as any)}
-        style={{
-          backgroundColor: "#1a0d2e",
-          padding: 16,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: "#9C27B0",
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ color: "#9C27B0", fontWeight: "700" }}>
-          🛍️ Tienda de productos
-        </Text>
-      </TouchableOpacity>
+      {/* Tienda — deshabilitada para el MVP, reactivar en constants/featureFlags.ts */}
+      {STORE_ENABLED && (
+        <TouchableOpacity
+          onPress={() => router.push("/store" as any)}
+          style={{
+            backgroundColor: "#1a0d2e",
+            padding: 16,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: "#9C27B0",
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: "#9C27B0", fontWeight: "700" }}>
+            🛍️ Tienda de productos
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         onPress={() => router.push("/profile")}
