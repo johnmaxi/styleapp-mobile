@@ -48,14 +48,16 @@ export default function ProfileScreen() {
           } catch {}
         }
 
-        try {
-          const balRes = await api.get("/payments/balance");
-          if (balRes?.data?.balance !== undefined) {
-            setBalance(Number(balRes.data.balance));
-          }
-        } catch {}
-
         const PROFESSIONAL_ROLES = ["barber", "estilista", "quiropodologo"];
+
+        if (PROFESSIONAL_ROLES.includes(user?.role || "")) {
+          try {
+            const balRes = await api.get("/payments/balance");
+            if (balRes?.data?.balance !== undefined) {
+              setBalance(Number(balRes.data.balance));
+            }
+          } catch {}
+        }
         if (PROFESSIONAL_ROLES.includes(user?.role || "")) {
           try {
             const res = await api.get("/service-requests/my-history");
@@ -126,6 +128,10 @@ export default function ProfileScreen() {
     quiropodologo: t("client.selectType.podologist"),
     admin: "Admin",
   };
+
+  const isProfessional = ["barber", "estilista", "quiropodologo"].includes(
+    user?.role || "",
+  );
 
   return (
     <ScrollView
@@ -206,61 +212,67 @@ export default function ProfileScreen() {
         <LanguageSelector palette={palette} />
       </View>
 
-      {/* ── SALDO ── */}
-      <View
-        style={{
-          backgroundColor: balanceBg,
-          borderWidth: 2,
-          borderColor: balanceBorder,
-          borderRadius: 14,
-          padding: 18,
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
-        <Text style={{ fontSize: 26 }}>{balanceIcon}</Text>
-        <Text
-          style={{
-            color: balanceColor,
-            fontWeight: "700",
-            fontSize: 13,
-            letterSpacing: 0.5,
-          }}
-        >
-          {balanceLabel.toUpperCase()}
-        </Text>
-        <Text style={{ color: balanceColor, fontWeight: "900", fontSize: 34 }}>
-          ${balance.toLocaleString("es-CO")}
-          <Text style={{ fontSize: 16, fontWeight: "400" }}> COP</Text>
-        </Text>
-        {balance < 0 && (
-          <Text
+      {/* ── SALDO — solo profesionales ── */}
+      {isProfessional && (
+        <>
+          <View
             style={{
-              color: "#F87171",
-              fontSize: 12,
-              textAlign: "center",
-              marginTop: 2,
+              backgroundColor: balanceBg,
+              borderWidth: 2,
+              borderColor: balanceBorder,
+              borderRadius: 14,
+              padding: 18,
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            {t("client.createService.price")}
-          </Text>
-        )}
-      </View>
+            <Text style={{ fontSize: 26 }}>{balanceIcon}</Text>
+            <Text
+              style={{
+                color: balanceColor,
+                fontWeight: "700",
+                fontSize: 13,
+                letterSpacing: 0.5,
+              }}
+            >
+              {balanceLabel.toUpperCase()}
+            </Text>
+            <Text
+              style={{ color: balanceColor, fontWeight: "900", fontSize: 34 }}
+            >
+              ${balance.toLocaleString("es-CO")}
+              <Text style={{ fontSize: 16, fontWeight: "400" }}> COP</Text>
+            </Text>
+            {balance < 0 && (
+              <Text
+                style={{
+                  color: "#F87171",
+                  fontSize: 12,
+                  textAlign: "center",
+                  marginTop: 2,
+                }}
+              >
+                {t("client.createService.price")}
+              </Text>
+            )}
+          </View>
 
-      {/* RECARGAR SALDO */}
-      <TouchableOpacity
-        style={{
-          backgroundColor: palette.primary,
-          padding: 14,
-          borderRadius: 10,
-          alignItems: "center",
-        }}
-        onPress={() => router.push("/recharge" as any)}
-      >
-        <Text style={{ color: "#000", fontWeight: "900", fontSize: 15 }}>
-          + {t("payments.recharge")}
-        </Text>
-      </TouchableOpacity>
+          {/* RECARGAR SALDO */}
+          <TouchableOpacity
+            style={{
+              backgroundColor: palette.primary,
+              padding: 14,
+              borderRadius: 10,
+              alignItems: "center",
+            }}
+            onPress={() => router.push("/recharge" as any)}
+          >
+            <Text style={{ color: "#000", fontWeight: "900", fontSize: 15 }}>
+              + {t("payments.recharge")}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
 
       {/* CALIFICACION */}
       <View
